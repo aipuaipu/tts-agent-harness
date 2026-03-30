@@ -92,7 +92,7 @@ P3_PID=""
 if should_run p3 || should_run p4; then
   echo ""
   echo "=== P3: Starting WhisperX Agent Server (port $P3_PORT) ==="
-  source "$HARNESS_DIR/scripts/start-p3-server.sh" "$P3_PORT" "$VENV" "$HARNESS_DIR/scripts/p3-transcribe.py"
+  source "$HARNESS_DIR/scripts/start-p3-server.sh" "$P3_PORT" "$VENV" "$HARNESS_DIR/scripts/p3-transcribe.py" "$WORK_DIR"
 fi
 
 # --- P3: Batch transcribe via server ---
@@ -134,11 +134,7 @@ if should_run p4; then
 fi
 
 # --- Shutdown P3 server ---
-if [[ -n "$P3_PID" ]] && kill -0 "$P3_PID" 2>/dev/null; then
-  echo "  Shutting down P3 server (PID $P3_PID)..."
-  kill "$P3_PID" 2>/dev/null
-  wait "$P3_PID" 2>/dev/null || true
-fi
+source "$HARNESS_DIR/scripts/stop-p3-server.sh" "$WORK_DIR" "$P3_PORT"
 
 # --- P5: Deterministic subtitle generation ---
 if should_run p5; then

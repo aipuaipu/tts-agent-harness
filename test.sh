@@ -27,11 +27,12 @@ if [[ "$MODE" == "--clean" ]]; then
 fi
 
 cleanup() {
-  if [[ -n "$P3_PID" ]] && kill -0 "$P3_PID" 2>/dev/null; then
-    kill "$P3_PID" 2>/dev/null; wait "$P3_PID" 2>/dev/null || true
-  fi
+  source "$HARNESS_DIR/scripts/stop-p3-server.sh" "$WORK" "$P3_PORT"
 }
 trap cleanup EXIT
+
+# 启动前清理残留的 P3 进程
+source "$HARNESS_DIR/scripts/stop-p3-server.sh" "$WORK" "$P3_PORT"
 
 mkdir -p "$WORK/audio" "$WORK/transcripts" "$WORK/validation" "$WORK/output"
 
@@ -116,8 +117,8 @@ NEED_TRANSCRIBE=$(node -e "
 if [[ "$NEED_TRANSCRIBE" -gt 0 ]]; then
   echo "  Transcribing $NEED_TRANSCRIBE chunk(s) (cached: $((CHUNK_COUNT - NEED_TRANSCRIBE)))..."
 
-  # 启动 P3 server
-  source "$HARNESS_DIR/scripts/start-p3-server.sh" "$P3_PORT" "$HARNESS_DIR/.venv/bin/activate" "$HARNESS_DIR/scripts/p3-transcribe.py"
+  # 启动 P3 server（传 work_dir 写 PID 文件）
+  source "$HARNESS_DIR/scripts/start-p3-server.sh" "$P3_PORT" "$HARNESS_DIR/.venv/bin/activate" "$HARNESS_DIR/scripts/p3-transcribe.py" "$WORK"
 
   source "$HARNESS_DIR/.venv/bin/activate"
   python "$HARNESS_DIR/scripts/p3-transcribe.py" \
@@ -146,7 +147,7 @@ if [[ "$MODE" != "--no-p4" ]]; then
 
   # 确保 P3 server 在跑
   if ! curl -s --noproxy 127.0.0.1 "http://127.0.0.1:$P3_PORT/health" 2>/dev/null | grep -q ok; then
-    source "$HARNESS_DIR/scripts/start-p3-server.sh" "$P3_PORT" "$HARNESS_DIR/.venv/bin/activate" "$HARNESS_DIR/scripts/p3-transcribe.py"
+    source "$HARNESS_DIR/scripts/start-p3-server.sh" "$P3_PORT" "$HARNESS_DIR/.venv/bin/activate" "$HARNESS_DIR/scripts/p3-transcribe.py" "$WORK"
   fi
 
   node "$HARNESS_DIR/scripts/p4-validate.js" \
@@ -177,13 +178,8 @@ if [[ "$MODE" != "--no-p4" ]]; then
   done
 fi
 
-# 关闭 P3 server（容错：kill 或 wait 失败不影响后续步骤）
-if [[ -n "${P3_PID:-}" ]]; then
-  kill "$P3_PID" 2>/dev/null || true
-  wait "$P3_PID" 2>/dev/null || true
-  P3_PID=""
-  echo "  P3 server stopped"
-fi
+# 关闭 P3 server
+source "$HARNESS_DIR/scripts/stop-p3-server.sh" "$WORK" "$P3_PORT"
 
 # ========================================
 # P5 + P6 + V2
