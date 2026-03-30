@@ -13,8 +13,6 @@
 const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
-const http = require("http");
-const tls = require("tls");
 const { trace } = require("./trace");
 
 // --- 配置 ---
@@ -53,93 +51,51 @@ if (!chunksPath || !outdir) {
 }
 
 // =============================================================
-// TTS API (via ClashX HTTPS proxy tunnel)
+// TTS API — standard https.request (proxy via HTTPS_PROXY env)
 // =============================================================
-
-const PROXY_HOST = "127.0.0.1";
-const PROXY_PORT = 7890;
 
 function callTTS(text) {
   return new Promise((resolve, reject) => {
-    const targetHost = "api.fish.audio";
-    const targetPort = 443;
+    const https = require("https");
+    const url = new URL(TTS_API_URL);
+    const payload = { text };
+    if (TTS_REFERENCE_ID) payload.reference_id = TTS_REFERENCE_ID;
+    const body = JSON.stringify(payload);
 
-    // Step 1: CONNECT to proxy
-    const proxyReq = http.request({
-      host: PROXY_HOST,
-      port: PROXY_PORT,
-      method: "CONNECT",
-      path: `${targetHost}:${targetPort}`,
-    });
-
-    proxyReq.on("connect", (res, socket) => {
-      if (res.statusCode !== 200) {
-        reject(new Error(`Proxy CONNECT failed: ${res.statusCode}`));
-        return;
-      }
-
-      // Step 2: TLS handshake over the tunnel
-      const tlsSocket = tls.connect({
-        host: targetHost,
-        socket: socket,
-        servername: targetHost,
-      }, () => {
-        const payload = { text };
-        if (TTS_REFERENCE_ID) payload.reference_id = TTS_REFERENCE_ID;
-        const body = JSON.stringify(payload);
-        const reqStr = [
-          `POST /v1/tts HTTP/1.1`,
-          `Host: ${targetHost}`,
-          `Content-Type: application/json`,
-          `Authorization: Bearer ${TTS_API_KEY}`,
-          `model: ${TTS_MODEL}`,
-          `Content-Length: ${Buffer.byteLength(body)}`,
-          `Connection: close`,
-          ``,
-          body,
-        ].join("\r\n");
-
-        tlsSocket.write(reqStr);
-      });
-
-      const chunks = [];
-      let headerParsed = false;
-      let headerBuf = Buffer.alloc(0);
-      let statusCode = 0;
-
-      tlsSocket.on("data", (chunk) => {
-        if (!headerParsed) {
-          headerBuf = Buffer.concat([headerBuf, chunk]);
-          const headerEnd = headerBuf.indexOf("\r\n\r\n");
-          if (headerEnd !== -1) {
-            const headerStr = headerBuf.slice(0, headerEnd).toString();
-            const statusLine = headerStr.split("\r\n")[0];
-            statusCode = parseInt(statusLine.split(" ")[1]);
-            headerParsed = true;
-            const bodyStart = headerBuf.slice(headerEnd + 4);
-            if (bodyStart.length > 0) chunks.push(bodyStart);
+    const req = https.request(
+      {
+        hostname: url.hostname,
+        port: 443,
+        path: url.pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${TTS_API_KEY}`,
+          "model": TTS_MODEL,
+          "Content-Length": Buffer.byteLength(body),
+        },
+        timeout: 120000,
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          if (res.statusCode !== 200) {
+            reject(new Error(`TTS API ${res.statusCode}: ${Buffer.concat(chunks).toString().slice(0, 200)}`));
+          } else {
+            resolve(Buffer.concat(chunks));
           }
-        } else {
-          chunks.push(chunk);
-        }
-      });
+        });
+      }
+    );
 
-      tlsSocket.on("end", () => {
-        const body = Buffer.concat(chunks);
-        if (statusCode !== 200) {
-          reject(new Error(`TTS API ${statusCode}: ${body.toString().slice(0, 200)}`));
-        } else {
-          resolve(body);
-        }
-      });
-
-      tlsSocket.on("error", reject);
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("TTS API timeout"));
     });
-
-    proxyReq.on("error", reject);
-    proxyReq.on("timeout", () => { proxyReq.destroy(); reject(new Error("Proxy connect timeout")); });
-    proxyReq.setTimeout(120000);
-    proxyReq.end();
+    req.write(body);
+    req.end();
   });
 }
 
