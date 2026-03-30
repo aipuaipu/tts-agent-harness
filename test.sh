@@ -35,8 +35,13 @@ trap cleanup EXIT
 
 mkdir -p "$WORK/audio" "$WORK/transcripts" "$WORK/validation" "$WORK/output"
 
+# 日志持久化：终端 + 文件
+LOG="$WORK/test.log"
+exec > >(tee -a "$LOG") 2>&1
+
 echo "=================================================="
 echo " E2E Test: $MODE"
+echo " Log: $LOG"
 echo " Work dir: $WORK"
 echo "=================================================="
 
@@ -154,11 +159,28 @@ if [[ "$MODE" != "--no-p4" ]]; then
 
   ROUNDS=$(ls "$WORK/validation/" 2>/dev/null | grep shot01 | wc -l | tr -d ' ')
   echo "  shot01: $ROUNDS validation round(s)"
+
+  # P4 校验报告汇总
+  echo ""
+  echo "--- P4 Validation Report ---"
+  for f in "$WORK/validation"/shot*_round*.json; do
+    [[ -f "$f" ]] || continue
+    node -e "
+      const r=require('$f');
+      const name=require('path').basename('$f');
+      const status=r.passed?'PASS':'FAIL';
+      const issues=(r.issues||[]).filter(i=>i.severity==='high');
+      console.log('  '+name+': '+status+(issues.length?' ('+issues.length+' high)':''));
+      issues.forEach(i=>console.log('    ['+i.type+'] \"'+i.original+'\" → \"'+i.transcribed+'\"'));
+      if(r.summary) console.log('    → '+r.summary);
+    "
+  done
 fi
 
-# 关闭 P3 server
-if [[ -n "$P3_PID" ]] && kill -0 "$P3_PID" 2>/dev/null; then
-  kill "$P3_PID" 2>/dev/null; wait "$P3_PID" 2>/dev/null || true
+# 关闭 P3 server（容错：kill 或 wait 失败不影响后续步骤）
+if [[ -n "${P3_PID:-}" ]]; then
+  kill "$P3_PID" 2>/dev/null || true
+  wait "$P3_PID" 2>/dev/null || true
   P3_PID=""
   echo "  P3 server stopped"
 fi
@@ -200,7 +222,18 @@ echo ""
 echo "=================================================="
 echo " E2E COMPLETE"
 echo "=================================================="
-echo " Preview: $WORK/preview.html"
 echo ""
-echo " To open: open $WORK/preview.html"
+echo " Artifacts:"
+echo "   Log:        $LOG"
+echo "   Chunks:     $WORK/chunks.json"
+echo "   Audio:      $WORK/audio/"
+echo "   Transcripts: $WORK/transcripts/"
+echo "   Validation: $WORK/validation/"
+echo "   Subtitles:  $WORK/subtitles.json"
+echo "   Preview:    $WORK/preview.html"
+echo ""
+echo " To review:"
+echo "   open $WORK/preview.html          # 字幕预览"
+echo "   cat $LOG                          # 完整日志"
+echo "   cat $WORK/validation/*.json       # P4 校验详情"
 open "$WORK/preview.html" 2>/dev/null || true
