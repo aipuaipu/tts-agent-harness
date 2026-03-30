@@ -95,6 +95,8 @@ function normalize(text) {
   // 破折号 → 逗号（防止 TTS 卡带声）
   t = t.replace(/——/g, "，");
   t = t.replace(/—/g, "，");
+  // 全大写英文词转首字母大写（RULES→Rules），防止 TTS 逐字母读卡死
+  t = t.replace(/\b([A-Z]{2,})\b/g, (m) => m[0] + m.slice(1).toLowerCase());
   // 文件后缀替换为中文可读形式（带前置空格，避免后续断句规则误匹配）
   t = t.replace(/\.md\b/g, " 文档");
   t = t.replace(/\.jsonl\b/g, " 文件");
@@ -229,8 +231,30 @@ function main() {
     allChunks.push(...chunks);
   }
 
-  // 写入 chunks.json
+  // 写入 chunks.json（合并已有运行时数据：duration_s, file, status 等）
   const outPath = path.join(outdir, "chunks.json");
+  let existingChunks = [];
+  try {
+    existingChunks = JSON.parse(fs.readFileSync(outPath, "utf-8"));
+  } catch {}
+  const existingMap = new Map(existingChunks.map((c) => [c.id, c]));
+
+  for (const chunk of allChunks) {
+    const existing = existingMap.get(chunk.id);
+    if (existing) {
+      // 保留运行时字段，只更新 P1 产出的字段
+      if (existing.duration_s != null) chunk.duration_s = existing.duration_s;
+      if (existing.file) chunk.file = existing.file;
+      if (existing.status && existing.status !== "pending") {
+        // 如果 text_normalized 变了，重置 status 触发重做
+        if (existing.text_normalized === chunk.text_normalized) {
+          chunk.status = existing.status;
+        }
+        // text_normalized 变了则保持 pending，让 P2 重做
+      }
+    }
+  }
+
   fs.writeFileSync(outPath, JSON.stringify(allChunks, null, 2));
 
   console.log(`\n=== Output: ${outPath} ===`);
