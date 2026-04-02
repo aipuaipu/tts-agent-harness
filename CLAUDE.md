@@ -2,6 +2,8 @@
 
 多 Agent TTS 语音生产系统。输入脚本 JSON，输出 per-shot WAV + 时间对齐字幕。
 
+**当前只支持**：Fish Audio TTS（S2-Pro/S1）+ Claude API（Anthropic）+ WhisperX（本地）。不支持其他 TTS 引擎或 LLM。
+
 ## 架构速查
 
 ```

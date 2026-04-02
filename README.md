@@ -41,13 +41,19 @@ Output: per-shot WAV + subtitles.json + durations.json + preview.html
 
 ## Quick Start
 
+### Supported Services
+
+- **TTS**: [Fish Audio](https://fish.audio) (S2-Pro / S1) — other TTS engines not supported
+- **Validation**: [Claude API](https://docs.anthropic.com/) (Anthropic) — other LLMs not supported
+- **Transcription**: [WhisperX](https://github.com/m-bain/whisperX) (local, no API needed)
+
 ### Prerequisites
 
 - Node.js 18+
 - Python 3.11 (for WhisperX)
 - ffmpeg + ffprobe
 - [Fish TTS](https://fish.audio) API key
-- Claude API access (via proxy or direct)
+- Claude API key or compatible proxy
 - HTTPS proxy (optional, via `HTTPS_PROXY` env var)
 
 ### Setup
