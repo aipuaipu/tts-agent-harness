@@ -1,26 +1,38 @@
 # TTS Rules
 
-P1 normalize 和 P4 Claude 都必须遵守这些规则。人工维护，harness 只读。
+发音规则备忘。当前 P1 不做内容修改，P4 生产中跳过，这些规则作为人工编辑 text 时的参考。
+
+## S2-Pro 控制标记
+
+脚本 `text` 字段中可内嵌以下控制标记，P2 直接传 TTS 引擎，P5 生成字幕时自动 strip：
+
+- `[break]` — 短停顿
+- `[breath]` — 气口
+- `[long break]` — 长停顿
+- `<|phoneme_start|>...<|phoneme_end|>` — 强制发音
 
 ## 英文处理
-- 句首英文品牌名前加 `.`（`.AutoGPT 十八万星标`）
-- 句中英文保持原样，不转中文，不音译人名
+
+- 英文品牌名/缩写保持原样，不转中文，不音译
+- S2-Pro 中文模型能读大部分英文品牌名，发音不稳定时用 phoneme 标注或人工调整
 - 英文连字符改空格（`yoyo-evolve` → `yoyo evolve`）
-- 文件后缀：`.md` → `文档`，`.json`/`.jsonl` → `文件`
-- OpenAI 句中加空格（`Open AI`）
 
 ## 数字处理
-- 年份转中文（`2024年` → `二零二四年`）
-- 百分比转中文（`53%` → `百分之五十三`）
-- 数字范围 dash 转"到"（`28-35K` → `28到35K`）
-- 带中文单位的数字保留原样（`630行`）
-- 其他数字问题交 P4 自动判断
 
-## TTS 模型
-- 默认速度 1.15x
-- 中文模型能读大部分英文品牌名，不需要音译
+- 数字保持原样，交 TTS 引擎处理
+- 如果 TTS 读法不理想，人工在 text 中改为中文写法（如 `2024年` → `二零二四年`）
 
-## P4 修复约束
-- 优先调断句/格式，不改原始含义
-- 同音字替换不算错误（的/地/得）
-- 只修复 high severity，low 自动放行
+## TTS 参数
+
+- 模型：S2-Pro（config.json p2.model）
+- 语速：1.15x（config.json p2.default_speed）
+- 采样：temperature=0.3, top_p=0.5（config.json p2.temperature/top_p）
+- normalize: false（P2 代码硬编码，让 S2-Pro 原样处理）
+
+## 人工修复流程
+
+遇到发音问题时：
+1. 修改 chunks.json 中目标 chunk 的 `text_normalized`
+2. 重跑 P2 合成该 chunk
+3. 人工听音频验证
+4. 满意后从 P3 续跑完成字幕和拼接
