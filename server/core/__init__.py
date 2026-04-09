@@ -1,8 +1,12 @@
 """server.core — shared business primitives.
 
-Populated incrementally by the wave agents:
+Contents:
+- db.py: async engine + session factory (A1)
+- models.py: SQLAlchemy 2.x ORM models for the business schema (A2)
+- domain.py: Pydantic v2 schemas — write/read/pipeline/event DTOs (A2)
+- repositories.py: async repositories for each table (A2)
+- storage.py: MinIO wrapper + S3 path constants (A2)
+- events.py: write_event + pg_notify plumbing (A2)
 
-- A1-Infra (this wave): db.py only — engine + session factory.
-- A2-Domain: models.py, domain.py, repositories.py, storage.py, events.py.
-- later waves: additional helpers as needed.
+No FastAPI, no Prefect — that lives in server/api and server/flows.
 """
