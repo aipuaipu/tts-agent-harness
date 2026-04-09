@@ -1,0 +1,29 @@
+# GPU support — NOT IMPLEMENTED, see W0 decisions (docs/adr/002-rewrite-plan.md §10 Q2)
+#
+# This file is a stub. CPU is the chosen starting point per W0. When GPU is
+# actually needed, finish this Dockerfile and wire it into docker-compose via a
+# build arg / target. Until then DO NOT docker build this file in CI.
+
+ARG CUDA_VERSION=12.4.0
+ARG PYTHON_VERSION=3.12
+ARG WHISPERX_DEVICE=cuda
+
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu22.04
+
+# TODO(A3 follow-up — GPU): implement when GPU hardware decision is made.
+#
+#   1. install python${PYTHON_VERSION} + pip + ffmpeg + build tooling
+#   2. install torch with matching CUDA wheels:
+#        pip install --index-url https://download.pytorch.org/whl/cu124 \
+#            torch torchaudio
+#   3. install whisperx + fastapi stack (same as CPU Dockerfile)
+#   4. copy server.py, set ENV WHISPER_DEVICE=cuda,
+#      WHISPER_COMPUTE_TYPE=float16, MODEL_CACHE_DIR=/models
+#   5. CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "7860"]
+#
+# Open questions to resolve before implementing:
+#   - nvidia-container-toolkit available in target environment?
+#   - which CUDA minor version matches the driver on the host?
+#   - is the model volume shared with the CPU image? (yes — same /models layout)
+
+CMD ["echo", "whisperx-svc GPU image is not implemented yet — see Dockerfile.gpu TODO"]
