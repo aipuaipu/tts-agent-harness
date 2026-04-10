@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import (
 
 from server.core.domain import ChunkInput
 from server.core.models import Base
-from server.core.repositories import ChunkRepo, EpisodeRepo, TakeRepo
+from server.core.repositories import ChunkRepo, EpisodeRepo, EventRepo, StageRunRepo, TakeRepo
 from server.core.domain import EpisodeCreate, TakeAppend
 
 
@@ -386,3 +386,168 @@ class TestAuth:
 
         app.dependency_overrides.clear()
         await _engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Duplicate endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestDuplicateEpisode:
+    async def test_duplicate_episode(self, seeded_client: AsyncClient):
+        # Override storage to support download_bytes for the duplicate flow
+        from server.api.main import app
+        from server.api.deps import get_storage
+
+        mock_storage = MagicMock()
+        script_content = json.dumps({"title": "Test", "segments": [{"id": 1, "text": "hello"}]})
+        mock_storage.download_bytes = AsyncMock(return_value=script_content.encode())
+        mock_storage.upload_bytes = AsyncMock(return_value="s3://tts-harness/episodes/ep-copy/script.json")
+        mock_storage.ensure_bucket = AsyncMock()
+        app.dependency_overrides[get_storage] = lambda: mock_storage
+
+        resp = await seeded_client.post(
+            "/episodes/ep-test/duplicate",
+            json={"new_id": "ep-copy"},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["id"] == "ep-copy"
+        assert data["title"] == "Test Episode"
+        assert data["status"] == "empty"
+
+        # Verify the new episode exists
+        resp2 = await seeded_client.get("/episodes/ep-copy")
+        assert resp2.status_code == 200
+
+    async def test_duplicate_not_found(self, client: AsyncClient):
+        resp = await client.post(
+            "/episodes/nope/duplicate",
+            json={"new_id": "ep-copy"},
+        )
+        assert resp.status_code == 404
+
+    async def test_duplicate_conflict(self, seeded_client: AsyncClient):
+        from server.api.main import app
+        from server.api.deps import get_storage
+
+        mock_storage = MagicMock()
+        mock_storage.download_bytes = AsyncMock(return_value=b'{"title":"T","segments":[]}')
+        mock_storage.upload_bytes = AsyncMock(return_value="s3://tts-harness/test/script.json")
+        mock_storage.ensure_bucket = AsyncMock()
+        app.dependency_overrides[get_storage] = lambda: mock_storage
+
+        # ep-test already exists — using it as new_id should fail
+        resp = await seeded_client.post(
+            "/episodes/ep-test/duplicate",
+            json={"new_id": "ep-test"},
+        )
+        assert resp.status_code == 422
+        assert resp.json()["error"] == "invalid_input"
+
+
+# ---------------------------------------------------------------------------
+# Archive endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestArchiveEpisode:
+    async def test_archive_episode(self, seeded_client: AsyncClient):
+        resp = await seeded_client.post("/episodes/ep-test/archive")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "archived_at" in data
+        assert data["archived_at"] is not None
+
+    async def test_archive_not_found(self, client: AsyncClient):
+        resp = await client.post("/episodes/nope/archive")
+        assert resp.status_code == 404
+
+    async def test_archived_excluded_from_list(self, seeded_client: AsyncClient):
+        # Archive the episode
+        await seeded_client.post("/episodes/ep-test/archive")
+        # List should exclude archived
+        resp = await seeded_client.get("/episodes")
+        assert resp.status_code == 200
+        ids = [ep["id"] for ep in resp.json()]
+        assert "ep-test" not in ids
+
+
+# ---------------------------------------------------------------------------
+# Chunk log endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestChunkLog:
+    async def test_get_chunk_log(self, seeded_client: AsyncClient):
+        # Seed a stage_run with log_uri
+        global _maker
+        async with _maker() as session:
+            sr_repo = StageRunRepo(session)
+            await sr_repo.upsert(
+                chunk_id="ep-test:shot01:0",
+                stage="p2",
+                status="ok",
+                log_uri="s3://tts-harness/episodes/ep-test/logs/ep-test:shot01:0/p2.log",
+            )
+            await session.commit()
+
+        # Override storage to return log content
+        from server.api.main import app
+        from server.api.deps import get_storage
+
+        mock_storage = MagicMock()
+        mock_storage.download_bytes = AsyncMock(return_value=b"[INFO] P2 synth started\n[INFO] P2 synth done")
+        mock_storage.ensure_bucket = AsyncMock()
+        app.dependency_overrides[get_storage] = lambda: mock_storage
+
+        resp = await seeded_client.get(
+            "/episodes/ep-test/chunks/ep-test:shot01:0/log",
+            params={"stage": "p2"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["stage"] == "p2"
+        assert data["chunk_id"] == "ep-test:shot01:0"
+        assert "P2 synth" in data["content"]
+
+    async def test_get_chunk_log_no_stage_run(self, seeded_client: AsyncClient):
+        resp = await seeded_client.get(
+            "/episodes/ep-test/chunks/ep-test:shot01:0/log",
+            params={"stage": "p5"},
+        )
+        assert resp.status_code == 404
+
+    async def test_get_chunk_log_chunk_not_found(self, client: AsyncClient):
+        resp = await client.get(
+            "/episodes/ep-test/chunks/nonexistent/log",
+            params={"stage": "p2"},
+        )
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Episode logs endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestEpisodeLogs:
+    async def test_get_episode_logs(self, seeded_client: AsyncClient):
+        # Events were already created by create_episode in seeded_client
+        resp = await seeded_client.get("/episodes/ep-test/logs")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "lines" in data
+        assert len(data["lines"]) >= 1
+        # Should contain the episode_created event
+        assert any("episode_created" in line for line in data["lines"])
+
+    async def test_get_episode_logs_tail(self, seeded_client: AsyncClient):
+        resp = await seeded_client.get("/episodes/ep-test/logs", params={"tail": 1})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["lines"]) <= 1
+
+    async def test_get_episode_logs_not_found(self, client: AsyncClient):
+        resp = await client.get("/episodes/nope/logs")
+        assert resp.status_code == 404

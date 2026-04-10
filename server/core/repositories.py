@@ -361,6 +361,22 @@ class EventRepo:
         res = await self.session.execute(stmt)
         return res.scalars().all()
 
+    async def list_recent(
+        self, episode_id: str, *, limit: int = 100
+    ) -> Sequence[Event]:
+        """Return the most recent *limit* events, ordered oldest-first."""
+        # Sub-select newest N, then re-order ascending for display.
+        inner = (
+            select(Event)
+            .where(Event.episode_id == episode_id)
+            .order_by(Event.id.desc())
+            .limit(limit)
+            .subquery()
+        )
+        stmt = select(Event).join(inner, Event.id == inner.c.id).order_by(Event.id.asc())
+        res = await self.session.execute(stmt)
+        return res.scalars().all()
+
     async def count(self, episode_id: str) -> int:
         stmt = select(func.count()).select_from(Event).where(
             Event.episode_id == episode_id

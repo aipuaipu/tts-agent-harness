@@ -7,9 +7,11 @@ validate input → call repo → return response model.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from minio.error import S3Error
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -72,6 +74,24 @@ class EditResponse(BaseModel):
 
 class DeleteResponse(BaseModel):
     deleted: bool
+
+
+class DuplicateRequest(BaseModel):
+    new_id: str
+
+
+class ArchiveResponse(BaseModel):
+    archived_at: datetime
+
+
+class ChunkLogResponse(BaseModel):
+    content: str
+    stage: str
+    chunk_id: str
+
+
+class EpisodeLogsResponse(BaseModel):
+    lines: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -396,3 +416,164 @@ async def finalize_take(
     await session.commit()
 
     return FinalizeResponse(flow_run_id=str(flow_run.id))
+
+
+# ---------------------------------------------------------------------------
+# POST /episodes/{id}/duplicate
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/episodes/{episode_id}/duplicate",
+    response_model=EpisodeView,
+    status_code=201,
+)
+async def duplicate_episode(
+    episode_id: str,
+    body: DuplicateRequest,
+    session: AsyncSession = Depends(get_session),
+    storage: MinIOStorage = Depends(get_storage),
+) -> EpisodeView:
+    repo = EpisodeRepo(session)
+    original = await repo.get(episode_id)
+    if original is None:
+        raise DomainError("not_found", f"episode '{episode_id}' not found")
+
+    # Check new_id is not taken
+    existing = await repo.get(body.new_id)
+    if existing is not None:
+        raise DomainError("invalid_input", f"episode '{body.new_id}' already exists")
+
+    # Read original script from MinIO
+    script_key = episode_script_key(episode_id)
+    try:
+        script_bytes = await storage.download_bytes(script_key)
+    except Exception:
+        raise DomainError("not_found", f"script for episode '{episode_id}' not found in storage")
+
+    # Upload script under new id
+    new_key = episode_script_key(body.new_id)
+    script_uri = await storage.upload_bytes(new_key, script_bytes, "application/json")
+
+    payload = EpisodeCreate(
+        id=body.new_id,
+        title=original.title,
+        description=original.description,
+        script_uri=script_uri,
+        config=original.config or {},
+    )
+    ep = await repo.create(payload)
+
+    event_repo = EventRepo(session)
+    await event_repo.write(
+        episode_id=ep.id,
+        chunk_id=None,
+        kind="episode_created",
+        payload={"title": ep.title, "duplicated_from": episode_id},
+    )
+
+    await session.commit()
+    return EpisodeView.model_validate(ep)
+
+
+# ---------------------------------------------------------------------------
+# POST /episodes/{id}/archive
+# ---------------------------------------------------------------------------
+
+
+@router.post("/episodes/{episode_id}/archive", response_model=ArchiveResponse)
+async def archive_episode(
+    episode_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> ArchiveResponse:
+    repo = EpisodeRepo(session)
+    ep = await repo.get(episode_id)
+    if ep is None:
+        raise DomainError("not_found", f"episode '{episode_id}' not found")
+
+    archived = await repo.archive(episode_id)
+    if not archived:
+        raise DomainError("not_found", f"episode '{episode_id}' not found")
+
+    await session.commit()
+
+    # Re-fetch to get the archived_at timestamp
+    ep = await repo.get(episode_id)
+    return ArchiveResponse(archived_at=ep.archived_at)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# GET /episodes/{id}/chunks/{cid}/log
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/episodes/{episode_id}/chunks/{chunk_id}/log",
+    response_model=ChunkLogResponse,
+)
+async def get_chunk_log(
+    episode_id: str,
+    chunk_id: str,
+    stage: str = Query(..., description="Stage name, e.g. p2"),
+    session: AsyncSession = Depends(get_session),
+    storage: MinIOStorage = Depends(get_storage),
+) -> ChunkLogResponse:
+    # Verify chunk belongs to episode
+    chunk_repo = ChunkRepo(session)
+    chunk = await chunk_repo.get(chunk_id)
+    if chunk is None or chunk.episode_id != episode_id:
+        raise DomainError("not_found", f"chunk '{chunk_id}' not found in episode '{episode_id}'")
+
+    # Get stage run for the log_uri
+    sr_repo = StageRunRepo(session)
+    sr = await sr_repo.get(chunk_id, stage)
+    if sr is None or not sr.log_uri:
+        raise DomainError("not_found", f"no log found for chunk '{chunk_id}' stage '{stage}'")
+
+    # log_uri is s3://bucket/key — extract key (strip "s3://bucket/" prefix)
+    if sr.log_uri.startswith("s3://"):
+        # s3://bucket/path/to/file → path/to/file
+        parts = sr.log_uri.split("/", 3)  # ['s3:', '', 'bucket', 'path/to/file']
+        log_key = parts[3] if len(parts) > 3 else ""
+    else:
+        log_key = sr.log_uri
+
+    try:
+        log_bytes = await storage.download_bytes(log_key)
+    except (S3Error, Exception):
+        raise DomainError("not_found", f"log file not found in storage for chunk '{chunk_id}' stage '{stage}'")
+
+    return ChunkLogResponse(
+        content=log_bytes.decode("utf-8", errors="replace"),
+        stage=stage,
+        chunk_id=chunk_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /episodes/{id}/logs
+# ---------------------------------------------------------------------------
+
+
+@router.get("/episodes/{episode_id}/logs", response_model=EpisodeLogsResponse)
+async def get_episode_logs(
+    episode_id: str,
+    tail: int = Query(100, ge=1, le=1000),
+    session: AsyncSession = Depends(get_session),
+) -> EpisodeLogsResponse:
+    repo = EpisodeRepo(session)
+    ep = await repo.get(episode_id)
+    if ep is None:
+        raise DomainError("not_found", f"episode '{episode_id}' not found")
+
+    event_repo = EventRepo(session)
+    events = await event_repo.list_recent(episode_id, limit=tail)
+
+    lines: list[str] = []
+    for ev in events:
+        ts = ev.created_at.strftime("%Y-%m-%d %H:%M:%S") if ev.created_at else "?"
+        chunk_part = f" chunk={ev.chunk_id}" if ev.chunk_id else ""
+        payload_str = " ".join(f"{k}={v}" for k, v in (ev.payload or {}).items())
+        lines.append(f"[{ts}]{chunk_part} {ev.kind} {payload_str}".rstrip())
+
+    return EpisodeLogsResponse(lines=lines)
