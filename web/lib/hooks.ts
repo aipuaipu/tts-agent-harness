@@ -133,9 +133,14 @@ export async function archiveEpisode(id: string): Promise<void> {
   if (error) throw new Error(String(error));
 }
 
-export async function runEpisode(id: string): Promise<string> {
+export async function runEpisode(
+  id: string,
+  mode: string = "synthesize",
+  chunkIds?: string[],
+): Promise<string> {
   const { data, error } = await api.POST("/episodes/{episode_id}/run", {
     params: { path: { episode_id: id } },
+    body: { mode, chunkIds: chunkIds ?? null } as never,
   });
   if (error) throw new Error(String(error));
   return data!.flowRunId;
@@ -225,6 +230,18 @@ export function useEpisodeLogs(id: string | null, tail = 50) {
       refreshInterval: 5000,
     },
   );
+}
+
+export async function updateConfig(
+  id: string,
+  config: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await api.PUT("/episodes/{episode_id}/config", {
+    params: { path: { episode_id: id } },
+    body: { config },
+  });
+  if (error) throw new Error(String(error));
+  return data!.config;
 }
 
 export async function exportEpisode(id: string, dir: string): Promise<void> {

@@ -5,6 +5,44 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/audio/{audio_key}": {
+      "get": {
+        "summary": "Serve Audio",
+        "description": "Stream a WAV file from MinIO.\n\naudio_key is the MinIO object key, e.g.\nepisodes/ch04/chunks/ch04:shot01:1/takes/abc123.wav",
+        "operationId": "serve_audio_audio__audio_key__get",
+        "parameters": [
+          {
+            "name": "audio_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Audio Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/episodes": {
       "get": {
         "tags": [
@@ -12,17 +50,39 @@
         ],
         "summary": "List Episodes",
         "operationId": "list_episodes_episodes_get",
+        "parameters": [
+          {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Archived"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/EpisodeSummary"
                   },
-                  "type": "array",
                   "title": "Response List Episodes Episodes Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -36,14 +96,14 @@
         "summary": "Create Episode",
         "operationId": "create_episode_episodes_post",
         "requestBody": {
+          "required": true,
           "content": {
             "multipart/form-data": {
               "schema": {
                 "$ref": "#/components/schemas/Body_create_episode_episodes_post"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -151,12 +211,105 @@
         }
       }
     },
+    "/episodes/{episode_id}/config": {
+      "get": {
+        "tags": [
+          "episodes"
+        ],
+        "summary": "Get Config",
+        "operationId": "get_config_episodes__episode_id__config_get",
+        "parameters": [
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Episode Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "episodes"
+        ],
+        "summary": "Update Config",
+        "operationId": "update_config_episodes__episode_id__config_put",
+        "parameters": [
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Episode Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/episodes/{episode_id}/run": {
       "post": {
         "tags": [
           "episodes"
         ],
         "summary": "Run Episode",
+        "description": "Trigger episode pipeline.\n\nModes (D-03 product design):\n- \"chunk_only\": Only P1 (split script into chunks). For empty episodes.\n- \"synthesize\": P2\u2192P3\u2192P5\u2192P6 for chunks without selected_take (skip confirmed).\n                Default mode. Reads episode.config for TTS params.\n- \"retry_failed\": Only re-run chunks with status=\"failed\", from their failed stage.\n- \"regenerate\": Clear all chunks/takes, re-run P1\u2192P2\u2192P3\u2192P5\u2192P6. Needs confirmation.\n\nchunk_ids: Optional list. If provided, only run these chunks (multi-select).",
         "operationId": "run_episode_episodes__episode_id__run_post",
         "parameters": [
           {
@@ -169,6 +322,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RunRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -880,6 +1050,34 @@
         ],
         "title": "ChunkLogResponse"
       },
+      "ConfigResponse": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config"
+          }
+        },
+        "type": "object",
+        "required": [
+          "config"
+        ],
+        "title": "ConfigResponse"
+      },
+      "ConfigUpdateRequest": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config"
+          }
+        },
+        "type": "object",
+        "required": [
+          "config"
+        ],
+        "title": "ConfigUpdateRequest"
+      },
       "DeleteResponse": {
         "properties": {
           "deleted": {
@@ -1200,6 +1398,32 @@
           "flowRunId"
         ],
         "title": "RetryResponse"
+      },
+      "RunRequest": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "synthesize"
+          },
+          "chunkIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunkids"
+          }
+        },
+        "type": "object",
+        "title": "RunRequest",
+        "description": "Optional body for POST /episodes/{id}/run."
       },
       "RunResponse": {
         "properties": {

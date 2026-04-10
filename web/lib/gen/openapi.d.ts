@@ -4,6 +4,29 @@
  */
 
 export interface paths {
+    "/audio/{audio_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Serve Audio
+         * @description Stream a WAV file from MinIO.
+         *
+         *     audio_key is the MinIO object key, e.g.
+         *     episodes/ch04/chunks/ch04:shot01:1/takes/abc123.wav
+         */
+        get: operations["serve_audio_audio__audio_key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/episodes": {
         parameters: {
             query?: never;
@@ -40,6 +63,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/episodes/{episode_id}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Config */
+        get: operations["get_config_episodes__episode_id__config_get"];
+        /** Update Config */
+        put: operations["update_config_episodes__episode_id__config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/episodes/{episode_id}/run": {
         parameters: {
             query?: never;
@@ -49,7 +90,19 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Run Episode */
+        /**
+         * Run Episode
+         * @description Trigger episode pipeline.
+         *
+         *     Modes (D-03 product design):
+         *     - "chunk_only": Only P1 (split script into chunks). For empty episodes.
+         *     - "synthesize": P2→P3→P5→P6 for chunks without selected_take (skip confirmed).
+         *                     Default mode. Reads episode.config for TTS params.
+         *     - "retry_failed": Only re-run chunks with status="failed", from their failed stage.
+         *     - "regenerate": Clear all chunks/takes, re-run P1→P2→P3→P5→P6. Needs confirmation.
+         *
+         *     chunk_ids: Optional list. If provided, only run these chunks (multi-select).
+         */
         post: operations["run_episode_episodes__episode_id__run_post"];
         delete?: never;
         options?: never;
@@ -297,6 +350,20 @@ export interface components {
             /** Chunkid */
             chunkId: string;
         };
+        /** ConfigResponse */
+        ConfigResponse: {
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+        };
+        /** ConfigUpdateRequest */
+        ConfigUpdateRequest: {
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+        };
         /** DeleteResponse */
         DeleteResponse: {
             /** Deleted */
@@ -438,6 +505,19 @@ export interface components {
             /** Flowrunid */
             flowRunId: string;
         };
+        /**
+         * RunRequest
+         * @description Optional body for POST /episodes/{id}/run.
+         */
+        RunRequest: {
+            /**
+             * Mode
+             * @default synthesize
+             */
+            mode: string;
+            /** Chunkids */
+            chunkIds?: string[] | null;
+        };
         /** RunResponse */
         RunResponse: {
             /** Flowrunid */
@@ -513,9 +593,42 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    list_episodes_episodes_get: {
+    serve_audio_audio__audio_key__get: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                audio_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_episodes_episodes_get: {
+        parameters: {
+            query?: {
+                include_archived?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -529,6 +642,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EpisodeSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -628,7 +750,7 @@ export interface operations {
             };
         };
     };
-    run_episode_episodes__episode_id__run_post: {
+    get_config_episodes__episode_id__config_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -638,6 +760,76 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_config_episodes__episode_id__config_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                episode_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfigUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_episode_episodes__episode_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                episode_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RunRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

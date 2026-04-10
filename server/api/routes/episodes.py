@@ -95,6 +95,21 @@ class EpisodeLogsResponse(_CamelBase):
     lines: list[str]
 
 
+class ConfigUpdateRequest(_CamelBase):
+    config: dict[str, Any]
+
+
+class ConfigResponse(_CamelBase):
+    config: dict[str, Any]
+
+
+class RunRequest(_CamelBase):
+    """Optional body for POST /episodes/{id}/run."""
+
+    mode: str = "synthesize"  # "chunk_only" | "synthesize" | "retry_failed" | "regenerate"
+    chunk_ids: list[str] | None = None  # for multi-select; None = all
+
+
 # ---------------------------------------------------------------------------
 # GET /episodes
 # ---------------------------------------------------------------------------
@@ -255,6 +270,58 @@ async def get_episode(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# GET/PUT /episodes/{id}/config
+# ---------------------------------------------------------------------------
+
+
+@router.get("/episodes/{episode_id}/config", response_model=ConfigResponse)
+async def get_config(
+    episode_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> ConfigResponse:
+    repo = EpisodeRepo(session)
+    ep = await repo.get(episode_id)
+    if ep is None:
+        raise DomainError("not_found", f"episode '{episode_id}' not found")
+    return ConfigResponse(config=ep.config or {})
+
+
+@router.put("/episodes/{episode_id}/config", response_model=ConfigResponse)
+async def update_config(
+    episode_id: str,
+    body: ConfigUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+) -> ConfigResponse:
+    repo = EpisodeRepo(session)
+    ep = await repo.get(episode_id)
+    if ep is None:
+        raise DomainError("not_found", f"episode '{episode_id}' not found")
+    # Merge: body.config overwrites existing keys
+    merged = {**(ep.config or {}), **body.config}
+    from sqlalchemy import update
+    from server.core.models import Episode as EpisodeModel
+    await session.execute(
+        update(EpisodeModel)
+        .where(EpisodeModel.id == episode_id)
+        .values(config=merged)
+    )
+    event_repo = EventRepo(session)
+    await event_repo.write(
+        episode_id=episode_id,
+        chunk_id=None,
+        kind="config_updated",
+        payload={"config": merged},
+    )
+    await session.commit()
+    return ConfigResponse(config=merged)
+
+
+# ---------------------------------------------------------------------------
+# DELETE /episodes/{id}
+# ---------------------------------------------------------------------------
+
+
 @router.delete("/episodes/{episode_id}", response_model=DeleteResponse)
 async def delete_episode(
     episode_id: str,
@@ -276,17 +343,39 @@ async def delete_episode(
 @router.post("/episodes/{episode_id}/run", response_model=RunResponse)
 async def run_episode(
     episode_id: str,
+    body: RunRequest | None = None,
     session: AsyncSession = Depends(get_session),
     prefect_client: Any = Depends(get_prefect_client),
 ) -> RunResponse:
+    """Trigger episode pipeline.
+
+    Modes (D-03 product design):
+    - "chunk_only": Only P1 (split script into chunks). For empty episodes.
+    - "synthesize": P2→P3→P5→P6 for chunks without selected_take (skip confirmed).
+                    Default mode. Reads episode.config for TTS params.
+    - "retry_failed": Only re-run chunks with status="failed", from their failed stage.
+    - "regenerate": Clear all chunks/takes, re-run P1→P2→P3→P5→P6. Needs confirmation.
+
+    chunk_ids: Optional list. If provided, only run these chunks (multi-select).
+    """
+    mode = (body.mode if body else None) or "synthesize"
+    chunk_ids = body.chunk_ids if body else None
+
     repo = EpisodeRepo(session)
     ep = await repo.get(episode_id)
     if ep is None:
         raise DomainError("not_found", f"episode '{episode_id}' not found")
 
+    if ep.status == "running":
+        raise DomainError("invalid_state", "episode is already running")
+
     flow_run = await prefect_client.create_flow_run_from_deployment(
         "run-episode/run-episode",
-        parameters={"episode_id": episode_id},
+        parameters={
+            "episode_id": episode_id,
+            "mode": mode,
+            "chunk_ids": chunk_ids,
+        },
     )
 
     await repo.set_status(episode_id, "running")
@@ -296,7 +385,7 @@ async def run_episode(
         episode_id=episode_id,
         chunk_id=None,
         kind="episode_status_changed",
-        payload={"status": "running"},
+        payload={"status": "running", "mode": mode},
     )
     await session.commit()
 

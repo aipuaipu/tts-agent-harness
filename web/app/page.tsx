@@ -17,6 +17,7 @@ import { ChunksTable } from "@/components/ChunksTable";
 import { LogViewer } from "@/components/LogViewer";
 import { NewEpisodeDialog } from "@/components/NewEpisodeDialog";
 import { StageProgress } from "@/components/StageProgress";
+import { EpisodeStageBar } from "@/components/EpisodeStageBar";
 
 export default function Page() {
   const [selectedId, setSelectedId] = useState<string | null>("ch04");
@@ -46,10 +47,10 @@ export default function Page() {
     setPlayingChunkId(null);
   };
 
-  const handleRun = async () => {
-    if (!selectedId) return;
+  const handleRun = async (mode: string) => {
+    if (!selectedId || !mode) return;
     try {
-      await runEpisode(selectedId);
+      await runEpisode(selectedId, mode);
       await mutateDetail();
       await mutateList();
     } catch (e) {
@@ -95,6 +96,7 @@ export default function Page() {
   };
 
   const running = episode?.status === "running";
+  const failedCount = episode?.chunks.filter((c) => c.status === "failed").length ?? 0;
 
   return (
     <div className="h-screen flex flex-col bg-neutral-50 text-neutral-900 overflow-hidden">
@@ -125,6 +127,7 @@ export default function Page() {
                 episode={episode}
                 running={running}
                 onRun={handleRun}
+                failedCount={failedCount}
               />
               <StageProgress
                 status={episode.status}
@@ -132,6 +135,9 @@ export default function Page() {
                 currentStage={null}
                 totalChunks={episode.chunks.length}
               />
+              {episode.chunks.length > 0 && (
+                <EpisodeStageBar chunks={episode.chunks} />
+              )}
               <EditBanner
                 ttsCount={dirtyCount.tts}
                 subCount={dirtyCount.sub}
