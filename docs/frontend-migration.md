@@ -46,8 +46,25 @@
 8. **M7** SettingsDialog（评估是否需要）
 9. **M8** RetryBanner（评估是否需要）
 
-## 问题记录（迁移中发现的问题）
+## 迁移结果
+
+| # | 组件 | 状态 | 备注 |
+|---|---|---|---|
+| M1 | StagePipeline | ✅ 完成 | 已适配 stageRuns 数组 |
+| M2 | ChunkRow + StagePipeline | ✅ 完成 | compact mode，onStageClick prop chain |
+| M3 | StageLogDrawer | ✅ 完成 | 已适配 StageRun type |
+| M4 | StageLogDrawer 接入 page.tsx | ✅ 完成 | drawerOpen state |
+| M5 | ScriptPreview | ⚠ 已 import | 后端不返回 segments，暂不渲染 |
+| M6 | HelpDialog | ✅ 完成 | ? 按钮在 header |
+| M7 | SettingsDialog | ⏭ 跳过 | 与 TtsConfigBar 职责重叠，待设计决策 |
+| M8 | RetryBanner | ⏭ 跳过 | runMode 已移除，不再需要 |
+| M9 | 键盘快捷键 | ✅ 完成 | Space/j/k/e/Esc |
+| M10 | 删除/复制/归档 | ✅ 完成 | sidebar ⋯ menu + handlers |
+
+## 问题记录
 
 | # | 问题 | 严重度 | 状态 | 备注 |
 |---|---|---|---|---|
-| — | — | — | — | — |
+| P1 | ScriptPreview 无数据源 | 低 | 跳过 | 后端 GET /episodes/{id} 不返回 script segments，前端无法渲染预览。需后端解析 script.json |
+| P2 | duration 异常值 48695s | 中 | 待修 | P2 合成后 take.durationS 为 48695.77，明显不对。可能是 WAV header 解析或 Fish API 返回的 metadata 问题 |
+| P3 | SettingsDialog 职责不明 | 低 | 跳过 | 原 demo 版管理 .harness/config.json，新版有 TtsConfigBar 管 episode.config，两者重叠 |
