@@ -6,7 +6,7 @@
  * Auto-reconnects via native EventSource behavior.
  */
 
-import { getApiUrl } from "./adapters/api/http-client";
+import { getApiUrl } from "./api-client";
 
 export interface StageEventData {
   id: number;

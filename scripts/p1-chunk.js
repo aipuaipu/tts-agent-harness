@@ -199,21 +199,54 @@ function main() {
 
   for (const chunk of allChunks) {
     const existing = existingMap.get(chunk.id);
-    if (existing) {
-      // 保留运行时字段，只更新 P1 产出的字段
-      if (existing.duration_s != null) chunk.duration_s = existing.duration_s;
-      if (existing.file) chunk.file = existing.file;
+    if (!existing) continue;
+
+    // 保留运行时字段
+    if (existing.duration_s != null) chunk.duration_s = existing.duration_s;
+    if (existing.file) chunk.file = existing.file;
+    if (existing.takes) chunk.takes = existing.takes;
+    if (existing.selected_take_id) chunk.selected_take_id = existing.selected_take_id;
+    if (existing.subtitle_text != null) chunk.subtitle_text = existing.subtitle_text;
+
+    // 边界变化检测：比较 script.json 的源文本(chunk.text),而不是 text_normalized。
+    // text_normalized 可能被用户在 UI 里编辑过(editing chunk.textNormalized),
+    // 如果用它做比较,重 run 会误认为"用户的编辑 = 边界变化"然后 reset status。
+    //
+    // 真正的"需要重跑 P1 下游"信号是 script.json 的 text 字段变化。
+    const textChanged = existing.text !== chunk.text;
+
+    if (textChanged) {
+      // script.json 真的改了这个 chunk 的原文 → 丢弃用户对 text_normalized 的编辑,
+      // 重算,reset status 让 P2 重做
+      chunk.status = "pending";
+      // chunk.text_normalized 已经是新算出来的,不用改
+    } else {
+      // script 没变 → 保留用户编辑过的 text_normalized 和 status
+      if (existing.text_normalized) {
+        chunk.text_normalized = existing.text_normalized;
+      }
       if (existing.status && existing.status !== "pending") {
-        // 如果 text_normalized 变了，重置 status 触发重做
-        if (existing.text_normalized === chunk.text_normalized) {
-          chunk.status = existing.status;
-        }
-        // text_normalized 变了则保持 pending，让 P2 重做
+        chunk.status = existing.status;
       }
     }
   }
 
   fs.writeFileSync(outPath, JSON.stringify(allChunks, null, 2));
+
+  // Script-level TTS config override (see docs/tts-config.md)
+  //
+  // IMPORTANT: 只在 tts_config.json 不存在时才从 script 拉取。
+  // 存在即视为"用户已经在 UI 里接管了这个配置",p1 不再覆盖它。
+  //
+  // 想恢复 script 默认的话,用 UI 的"清除覆盖"按钮(删 tts_config.json),
+  // 下次 run 会重新拉取。
+  const ttsConfigPath = path.join(outdir, "tts_config.json");
+  if (fs.existsSync(ttsConfigPath)) {
+    console.log(`  Preserving existing tts_config.json (user override)`);
+  } else if (script.tts_config && typeof script.tts_config === "object") {
+    fs.writeFileSync(ttsConfigPath, JSON.stringify(script.tts_config, null, 2));
+    console.log(`  Wrote script tts_config → ${ttsConfigPath}`);
+  }
 
   console.log(`\n=== Output: ${outPath} ===`);
   console.log(`  Total chunks: ${allChunks.length}`);

@@ -19,11 +19,16 @@ import json
 import os
 import sys
 import signal
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
 import torch
 import whisperx
+
+# Import sibling events module
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import events  # noqa: E402
 
 DEVICE = "cpu"
 LANGUAGE = "zh"
@@ -192,10 +197,21 @@ def run_server(port):
 # Batch 模式（通过 HTTP 调用 server，或直接本地处理）
 # =============================================================
 
-def run_batch(chunks_path, audiodir, outdir, chunk_id=None, server_url=None):
-    """Batch 转写：如果有 server_url 走 HTTP，否则本地加载模型"""
+def run_batch(chunks_path, audiodir, outdir, chunk_id=None, server_urls=None, trace_path=None):
+    """Batch 转写：如果有 server_urls 走 HTTP（可多 URL 并发），否则本地加载模型"""
     chunks = json.loads(open(chunks_path).read())
     os.makedirs(outdir, exist_ok=True)
+
+    # workDir = parent of chunks.json
+    work_dir = os.path.dirname(os.path.abspath(chunks_path))
+    if not trace_path:
+        trace_path = os.path.join(work_dir, "trace.jsonl")
+
+    # Startup: opportunistic trace compaction
+    try:
+        events.maybe_compact_trace(trace_path)
+    except Exception:
+        pass
 
     if chunk_id:
         to_process = [c for c in chunks if c["id"] == chunk_id]
@@ -208,15 +224,14 @@ def run_batch(chunks_path, audiodir, outdir, chunk_id=None, server_url=None):
 
     print(f"=== P3: Transcribing {len(to_process)} chunk(s) ===\n")
 
-    if server_url:
-        _batch_via_http(chunks, to_process, audiodir, outdir, server_url)
+    if server_urls:
+        _batch_via_http(chunks, to_process, audiodir, outdir, server_urls, work_dir, trace_path, chunks_path)
     else:
         load_models()
-        _batch_local(chunks, to_process, audiodir, outdir)
-
-    # 回写 chunks.json
-    with open(chunks_path, "w", encoding="utf-8") as f:
-        json.dump(chunks, f, ensure_ascii=False, indent=2)
+        _batch_local(chunks, to_process, audiodir, outdir, work_dir, trace_path)
+        # 回写 chunks.json（本地模式单线程，最后一次性写）
+        with open(chunks_path, "w", encoding="utf-8") as f:
+            json.dump(chunks, f, ensure_ascii=False, indent=2)
 
     ok = sum(1 for c in to_process if c.get("status") == "transcribed")
     print(f"\n=== Done: {ok}/{len(to_process)} transcribed ===")
@@ -227,55 +242,125 @@ def run_batch(chunks_path, audiodir, outdir, chunk_id=None, server_url=None):
         sys.exit(1)
 
 
-def _batch_local(chunks, to_process, audiodir, outdir):
+def _log_and_print(log_file, msg):
+    print(msg)
+    events.append_stage_log(log_file, msg)
+
+
+def _batch_local(chunks, to_process, audiodir, outdir, work_dir, trace_path):
     for chunk in to_process:
-        audio_path = os.path.join(audiodir, f"{chunk['id']}.wav")
+        cid = chunk["id"]
+        log_file = events.open_stage_log(work_dir, cid, "p3")
+        events.emit_stage_start(trace_path, cid, "p3", attempt=1)
+        start_ts = time.time()
+
+        audio_path = os.path.join(audiodir, f"{cid}.wav")
         if not os.path.exists(audio_path):
-            print(f"  [SKIP] {chunk['id']}: {audio_path} not found")
+            msg = f"  [SKIP] {cid}: {audio_path} not found"
+            _log_and_print(log_file, msg)
             chunk["status"] = "transcribe_failed"
             chunk["error"] = f"audio not found: {audio_path}"
+            events.emit_stage_end(
+                trace_path, cid, "p3", "fail",
+                duration_ms=int((time.time() - start_ts) * 1000),
+                error=f"audio not found: {audio_path}",
+            )
             continue
 
-        print(f"  [TRANSCRIBE] {chunk['id']}...")
+        _log_and_print(log_file, f"  [TRANSCRIBE] {cid}...")
         try:
             result = transcribe_audio(audio_path)
             output = format_output(
-                chunk["id"], chunk.get("shot_id", ""),
+                cid, chunk.get("shot_id", ""),
                 chunk["text"], chunk["text_normalized"], result
             )
 
-            out_path = os.path.join(outdir, f"{chunk['id']}.json")
+            out_path = os.path.join(outdir, f"{cid}.json")
             with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(output, f, ensure_ascii=False, indent=2)
 
-            print(f"    → {out_path}")
-            print(f"    转写: {output['full_transcribed_text'][:60]}...")
+            _log_and_print(log_file, f"    → {out_path}")
+            _log_and_print(log_file, f"    转写: {output['full_transcribed_text'][:60]}...")
             chunk["status"] = "transcribed"
+            events.emit_stage_end(
+                trace_path, cid, "p3", "ok",
+                duration_ms=int((time.time() - start_ts) * 1000),
+            )
 
         except Exception as e:
-            print(f"    [ERROR] {chunk['id']}: {e}")
+            _log_and_print(log_file, f"    [ERROR] {cid}: {e}")
             chunk["status"] = "transcribe_failed"
             chunk["error"] = str(e)
+            events.emit_stage_end(
+                trace_path, cid, "p3", "fail",
+                duration_ms=int((time.time() - start_ts) * 1000),
+                error=str(e),
+            )
 
 
-def _batch_via_http(chunks, to_process, audiodir, outdir, server_url):
+def _batch_via_http(chunks, to_process, audiodir, outdir, server_urls, work_dir, trace_path, chunks_path):
+    """
+    Batch 转写 via HTTP — 支持多 URL round-robin 并发。
+
+    server_urls: list[str]，一个或多个 server URL。
+    当 len(server_urls) == 1 时行为等同于原串行实现（ThreadPool max_workers=1）。
+    """
     import urllib.request
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
     # 本地 server 不走代理
     os.environ["no_proxy"] = "127.0.0.1,localhost"
 
-    for chunk in to_process:
-        audio_path = os.path.abspath(os.path.join(audiodir, f"{chunk['id']}.wav"))
+    urls = list(server_urls)
+    n_workers = max(1, len(urls))
+
+    # 用于原子分配 URL 的计数器 + 锁
+    rr_counter = {"n": 0}
+    rr_lock = threading.Lock()
+
+    def _next_url():
+        with rr_lock:
+            idx = rr_counter["n"] % len(urls)
+            rr_counter["n"] += 1
+            return urls[idx]
+
+    # 写 chunks.json 的锁（多线程回写状态）
+    chunks_write_lock = threading.Lock()
+
+    def _persist_chunks():
+        """线程安全回写 chunks.json。每个 chunk 完成后持久化一次，避免崩溃丢状态。"""
+        with chunks_write_lock:
+            with open(chunks_path, "w", encoding="utf-8") as f:
+                json.dump(chunks, f, ensure_ascii=False, indent=2)
+
+    def _worker(chunk):
+        cid = chunk["id"]
+        # open_stage_log 每 chunk 独立文件，天然线程安全
+        log_file = events.open_stage_log(work_dir, cid, "p3")
+        events.emit_stage_start(trace_path, cid, "p3", attempt=1)
+        start_ts = time.time()
+
+        audio_path = os.path.abspath(os.path.join(audiodir, f"{cid}.wav"))
         if not os.path.exists(audio_path):
-            print(f"  [SKIP] {chunk['id']}: {audio_path} not found")
+            msg = f"  [SKIP] {cid}: {audio_path} not found"
+            _log_and_print(log_file, msg)
             chunk["status"] = "transcribe_failed"
             chunk["error"] = f"audio not found: {audio_path}"
-            continue
+            events.emit_stage_end(
+                trace_path, cid, "p3", "fail",
+                duration_ms=int((time.time() - start_ts) * 1000),
+                error=f"audio not found: {audio_path}",
+            )
+            _persist_chunks()
+            return
 
-        print(f"  [TRANSCRIBE via HTTP] {chunk['id']}...")
+        url = _next_url()
+        _log_and_print(log_file, f"  [TRANSCRIBE via HTTP] {cid} -> {url}...")
         try:
             body = json.dumps({
                 "audio_path": audio_path,
-                "chunk_id": chunk["id"],
+                "chunk_id": cid,
                 "shot_id": chunk.get("shot_id", ""),
                 "text": chunk["text"],
                 "text_normalized": chunk["text_normalized"],
@@ -283,23 +368,39 @@ def _batch_via_http(chunks, to_process, audiodir, outdir, server_url):
             }).encode()
 
             req = urllib.request.Request(
-                f"{server_url}/transcribe",
+                f"{url}/transcribe",
                 data=body,
                 headers={"Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=300) as resp:
                 result = json.loads(resp.read())
 
             if "error" in result:
                 raise Exception(result["error"])
 
-            print(f"    转写: {result['full_transcribed_text'][:60]}...")
+            _log_and_print(log_file, f"    转写: {result['full_transcribed_text'][:60]}...")
             chunk["status"] = "transcribed"
+            events.emit_stage_end(
+                trace_path, cid, "p3", "ok",
+                duration_ms=int((time.time() - start_ts) * 1000),
+            )
 
         except Exception as e:
-            print(f"    [ERROR] {chunk['id']}: {e}")
+            _log_and_print(log_file, f"    [ERROR] {cid}: {e}")
             chunk["status"] = "transcribe_failed"
             chunk["error"] = str(e)
+            events.emit_stage_end(
+                trace_path, cid, "p3", "fail",
+                duration_ms=int((time.time() - start_ts) * 1000),
+                error=str(e),
+            )
+
+        _persist_chunks()
+
+    # 单 URL → max_workers=1 等价串行，行为与原实现一致
+    with ThreadPoolExecutor(max_workers=n_workers) as ex:
+        # list() 确保等待所有 future 完成 + 传播异常（不会传播，_worker 内部捕获）
+        list(ex.map(_worker, to_process))
 
 
 # =============================================================
@@ -314,13 +415,21 @@ if __name__ == "__main__":
     parser.add_argument("--audiodir", default=None, help="Directory with chunk WAV files")
     parser.add_argument("--outdir", default=None, help="Output directory for transcription JSON")
     parser.add_argument("--chunk", default=None, help="Process only this chunk ID")
-    parser.add_argument("--server-url", default=None, help="P3 server URL for batch-via-HTTP mode")
+    parser.add_argument("--server-url", default=None, help="P3 server URL for batch-via-HTTP mode (single URL, backward compat)")
+    parser.add_argument("--server-urls", default=None, help="Comma-separated list of P3 server URLs for multi-worker parallel mode")
+    parser.add_argument("--trace", default=None, help="Path to trace.jsonl (default: <workDir>/trace.jsonl)")
     args = parser.parse_args()
 
     if args.server:
         run_server(args.port)
     elif args.chunks and args.audiodir and args.outdir:
-        run_batch(args.chunks, args.audiodir, args.outdir, args.chunk, args.server_url)
+        # 合并 --server-url / --server-urls → 列表
+        urls = None
+        if args.server_urls:
+            urls = [u.strip() for u in args.server_urls.split(",") if u.strip()]
+        elif args.server_url:
+            urls = [args.server_url.strip()]
+        run_batch(args.chunks, args.audiodir, args.outdir, args.chunk, urls, args.trace)
     else:
         parser.print_help()
         sys.exit(1)

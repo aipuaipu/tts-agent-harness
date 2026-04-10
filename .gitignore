@@ -15,3 +15,5 @@ __pycache__/
 .idea/
 .harness/normalize-patches.json
 .harness/tts-known-issues.json
+.claude/
+.venv-server/

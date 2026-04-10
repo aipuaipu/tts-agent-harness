@@ -3,27 +3,33 @@
 import { useEffect } from "react";
 import useSWR from "swr";
 import type { ChunkEdit, Episode, EpisodeSummary, StageName } from "./types";
-import { apiGet, apiPost, apiPostForm, getApiUrl } from "./adapters/api/http-client";
-import type { RawEpisodeDetail, RawEpisodeSummary } from "./adapters/api/mappers";
-import { mapEpisodeDetail, mapEpisodeSummary } from "./adapters/api/mappers";
+import type { components } from "./gen/openapi";
+import { api, getApiUrl } from "./api-client";
 import { connectSSE } from "./sse-client";
 import type { StageEventData } from "./sse-client";
 
 // ---------------------------------------------------------------------------
-// SWR fetchers
+// Type aliases from generated OpenAPI schemas
 // ---------------------------------------------------------------------------
 
-const episodeListFetcher = async (): Promise<EpisodeSummary[]> => {
-  const raw = await apiGet<RawEpisodeSummary[]>("/episodes");
-  return raw.map(mapEpisodeSummary);
-};
+type ApiEpisodeSummary = components["schemas"]["EpisodeSummary"];
+type ApiEpisodeDetail = components["schemas"]["EpisodeDetail"];
 
-const episodeDetailFetcher = async (id: string): Promise<Episode> => {
-  const raw = await apiGet<RawEpisodeDetail>(
-    `/episodes/${encodeURIComponent(id)}`,
-  );
-  return mapEpisodeDetail(raw);
-};
+// ---------------------------------------------------------------------------
+// Converters: generated API types → frontend domain types
+//
+// Since backend outputs camelCase, these are mostly identity casts.
+// Only needed where frontend types differ from API types (e.g. optional
+// vs nullable, extra computed fields).
+// ---------------------------------------------------------------------------
+
+function toEpisodeSummary(raw: ApiEpisodeSummary): EpisodeSummary {
+  return raw as unknown as EpisodeSummary;
+}
+
+function toEpisode(raw: ApiEpisodeDetail): Episode {
+  return raw as unknown as Episode;
+}
 
 // ---------------------------------------------------------------------------
 // Hooks
@@ -37,7 +43,11 @@ interface HookResult<T> {
 }
 
 export function useEpisodes(): HookResult<EpisodeSummary[]> {
-  const swr = useSWR<EpisodeSummary[]>("api:episodes", episodeListFetcher);
+  const swr = useSWR<EpisodeSummary[]>("api:episodes", async () => {
+    const { data, error } = await api.GET("/episodes");
+    if (error) throw new Error(String(error));
+    return (data ?? []).map(toEpisodeSummary);
+  });
   return {
     data: swr.data,
     error: (swr.error as Error) ?? null,
@@ -49,7 +59,13 @@ export function useEpisodes(): HookResult<EpisodeSummary[]> {
 export function useEpisode(id: string | null): HookResult<Episode> {
   const swr = useSWR<Episode>(
     id ? `api:episode:${id}` : null,
-    () => episodeDetailFetcher(id!),
+    async () => {
+      const { data, error } = await api.GET("/episodes/{episode_id}", {
+        params: { path: { episode_id: id! } },
+      });
+      if (error) throw new Error(String(error));
+      return toEpisode(data!);
+    },
     {
       refreshInterval: (data) => (data?.status === "running" ? 2000 : 0),
     },
@@ -61,12 +77,8 @@ export function useEpisode(id: string | null): HookResult<Episode> {
     if (!id) return;
     const conn = connectSSE(
       id,
-      (_event: StageEventData) => {
-        mutate();
-      },
-      () => {
-        // SSE error — SWR polling is fallback
-      },
+      (_event: StageEventData) => { mutate(); },
+      () => { /* SSE error — SWR polling is fallback */ },
     );
     return () => conn.close();
   }, [id, mutate]);
@@ -80,47 +92,77 @@ export function useEpisode(id: string | null): HookResult<Episode> {
 }
 
 // ---------------------------------------------------------------------------
-// Imperative operations
+// Imperative operations (type-safe via openapi-fetch)
 // ---------------------------------------------------------------------------
 
 export async function createEpisode(id: string, file: File): Promise<void> {
-  const fd = new FormData();
-  fd.append("id", id);
-  fd.append("script", file);
-  await apiPostForm("/episodes", fd);
+  const { error } = await api.POST("/episodes", {
+    body: { id, script: file } as never, // multipart — openapi-fetch handles FormData
+    bodySerializer: (body: Record<string, unknown>) => {
+      const fd = new FormData();
+      fd.append("id", body.id as string);
+      fd.append("script", body.script as File);
+      return fd;
+    },
+  });
+  if (error) throw new Error(String(error));
 }
 
 export async function deleteEpisode(id: string): Promise<void> {
-  const { apiDelete } = await import("./adapters/api/http-client");
-  await apiDelete(`/episodes/${encodeURIComponent(id)}`);
+  const { error } = await api.DELETE("/episodes/{episode_id}", {
+    params: { path: { episode_id: id } },
+  });
+  if (error) throw new Error(String(error));
+}
+
+export async function duplicateEpisode(
+  id: string,
+  newId: string,
+): Promise<void> {
+  const { error } = await api.POST("/episodes/{episode_id}/duplicate", {
+    params: { path: { episode_id: id } },
+    body: { newId },
+  });
+  if (error) throw new Error(String(error));
+}
+
+export async function archiveEpisode(id: string): Promise<void> {
+  const { error } = await api.POST("/episodes/{episode_id}/archive", {
+    params: { path: { episode_id: id } },
+  });
+  if (error) throw new Error(String(error));
 }
 
 export async function runEpisode(id: string): Promise<string> {
-  const res = await apiPost<{ flow_run_id: string }>(
-    `/episodes/${encodeURIComponent(id)}/run`,
-  );
-  return res.flow_run_id;
+  const { data, error } = await api.POST("/episodes/{episode_id}/run", {
+    params: { path: { episode_id: id } },
+  });
+  if (error) throw new Error(String(error));
+  return data!.flowRunId;
 }
 
 export async function applyEdits(
   id: string,
   edits: Record<string, ChunkEdit>,
 ): Promise<void> {
-  const entries = Object.entries(edits);
-  for (const [cid, edit] of entries) {
-    const body: Record<string, unknown> = {};
-    if (edit.textNormalized !== undefined) body.text_normalized = edit.textNormalized;
-    if (edit.subtitleText !== undefined) body.subtitle_text = edit.subtitleText;
-    await apiPost(
-      `/episodes/${encodeURIComponent(id)}/chunks/${encodeURIComponent(cid)}/edit`,
-      body,
-    );
+  for (const [cid, edit] of Object.entries(edits)) {
+    await api.POST("/episodes/{episode_id}/chunks/{chunk_id}/edit", {
+      params: {
+        path: { episode_id: id, chunk_id: cid },
+        query: {
+          text_normalized: edit.textNormalized,
+          subtitle_text: edit.subtitleText,
+        },
+      },
+    });
 
     const fromStage = edit.textNormalized !== undefined ? "p2" : "p5";
-    await apiPost(
-      `/episodes/${encodeURIComponent(id)}/chunks/${encodeURIComponent(cid)}/retry`,
-      { from_stage: fromStage, cascade: true },
-    );
+    await api.POST("/episodes/{episode_id}/chunks/{chunk_id}/retry", {
+      params: {
+        path: { episode_id: id, chunk_id: cid },
+        query: { from_stage: fromStage, cascade: true },
+      },
+    });
   }
 }
 
@@ -130,11 +172,17 @@ export async function retryChunk(
   fromStage: StageName,
   cascade = true,
 ): Promise<string> {
-  const res = await apiPost<{ flow_run_id: string }>(
-    `/episodes/${encodeURIComponent(epId)}/chunks/${encodeURIComponent(cid)}/retry`,
-    { from_stage: fromStage, cascade },
+  const { data, error } = await api.POST(
+    "/episodes/{episode_id}/chunks/{chunk_id}/retry",
+    {
+      params: {
+        path: { episode_id: epId, chunk_id: cid },
+        query: { from_stage: fromStage, cascade },
+      },
+    },
   );
-  return res.flow_run_id;
+  if (error) throw new Error(String(error));
+  return data!.flowRunId;
 }
 
 export async function finalizeTake(
@@ -142,16 +190,24 @@ export async function finalizeTake(
   cid: string,
   takeId: string,
 ): Promise<string> {
-  const res = await apiPost<{ flow_run_id: string }>(
-    `/episodes/${encodeURIComponent(epId)}/chunks/${encodeURIComponent(cid)}/finalize-take`,
-    { take_id: takeId },
+  const { data, error } = await api.POST(
+    "/episodes/{episode_id}/chunks/{chunk_id}/finalize-take",
+    {
+      params: {
+        path: { episode_id: epId, chunk_id: cid },
+        query: { take_id: takeId },
+      },
+    },
   );
-  return res.flow_run_id;
+  if (error) throw new Error(String(error));
+  return data!.flowRunId;
 }
 
-/** Convert a MinIO URI to an accessible URL via the API proxy. */
+/** Convert a MinIO URI to an accessible URL. */
 export function getAudioUrl(audioUri: string): string {
-  // audioUri is a MinIO key like "episodes/ch04/audio/shot01_chunk01.wav"
-  // Proxy through FastAPI. Encode the full URI as a path param.
   return `${getApiUrl()}/audio/${encodeURIComponent(audioUri)}`;
+}
+
+export async function exportEpisode(id: string, dir: string): Promise<void> {
+  throw new Error(`exportEpisode not implemented (target: ${dir})`);
 }

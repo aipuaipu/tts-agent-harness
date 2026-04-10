@@ -383,8 +383,16 @@ cat > "$WORK/transcripts/t1.json" << 'EOF'
 {"chunk_id":"t1","segments":[{"text":"一二三","start":0.0,"end":1.5,"words":[]}],"full_transcribed_text":"一二三"}
 EOF
 
-run_test "Precheck P3: char ratio 0.3 fails (exit 1)" \
-  "! node '$HARNESS/scripts/precheck.js' --stage p3 --chunks '$WORK/chunks_p3_ratio.json' --transcripts '$WORK/transcripts' 2>/dev/null"
+# char ratio mismatch is now SOFT fail: exits 0, emits warning to stderr.
+# Downstream stages still run (other chunks may be fine).
+# Per-chunk fail state is captured via trace.jsonl events for UI.
+run_test "Precheck P3: char ratio 0.3 is soft fail (exit 0)" \
+  "node '$HARNESS/scripts/precheck.js' --stage p3 --chunks '$WORK/chunks_p3_ratio.json' --transcripts '$WORK/transcripts' 2>/dev/null"
+
+# Hard fail: transcript file missing → exit 1
+mkdir -p "$WORK/transcripts_empty"
+run_test "Precheck P3: missing transcript is hard fail (exit 1)" \
+  "! node '$HARNESS/scripts/precheck.js' --stage p3 --chunks '$WORK/chunks_p3_ratio.json' --transcripts '$WORK/transcripts_empty' 2>/dev/null"
 
 rm -rf "$WORK"
 
@@ -425,26 +433,6 @@ run_test "P1 merge: preserves status when text unchanged" \
   "node -e \"const c=require('$MERGE_WORK/chunks.json'); process.exit(c[0].status==='transcribed'?0:1)\""
 
 rm -rf "$MERGE_WORK"
-
-echo ""
-echo "--- Trace ---"
-
-WORK=$(mktemp -d)
-TRACE_FILE="$WORK/trace.jsonl"
-
-run_test "trace: writes valid JSONL" \
-  "node -e \"
-    const {trace}=require('$HARNESS/scripts/trace.js');
-    trace('$TRACE_FILE',{chunk:'c1',phase:'p2',event:'start'});
-    trace('$TRACE_FILE',{chunk:'c1',phase:'p2',event:'done',duration_ms:1234});
-    const lines=require('fs').readFileSync('$TRACE_FILE','utf-8').trim().split('\n');
-    process.exit(lines.length===2 && lines.every(l=>JSON.parse(l).ts)?0:1);
-  \""
-
-run_test "trace: summary doesn't crash" \
-  "node -e \"require('$HARNESS/scripts/trace.js').summary('$TRACE_FILE')\" 2>/dev/null"
-
-rm -rf "$WORK"
 
 # ------------------------------------------------
 # Post-P6 Validation Tests

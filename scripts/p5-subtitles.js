@@ -13,25 +13,34 @@
 
 const fs = require("fs");
 const path = require("path");
+const { emitStageStart, emitStageEnd, openStageLog, appendStageLog, maybeCompactTrace } = require("./events");
 
 // --- 参数解析 ---
 const args = process.argv.slice(2);
 let chunksPath = "";
 let transcriptsDir = "";
 let outdir = "";
+let tracePath = "";
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--chunks" && args[i + 1]) chunksPath = args[++i];
   else if (args[i] === "--transcripts" && args[i + 1]) transcriptsDir = args[++i];
   else if (args[i] === "--outdir" && args[i + 1]) outdir = args[++i];
+  else if (args[i] === "--trace" && args[i + 1]) tracePath = args[++i];
 }
 
 if (!chunksPath || !transcriptsDir || !outdir) {
   console.error(
-    "Usage: node p5-subtitles.js --chunks <chunks.json> --transcripts <dir> --outdir <dir>"
+    "Usage: node p5-subtitles.js --chunks <chunks.json> --transcripts <dir> --outdir <dir> [--trace <path>]"
   );
   process.exit(1);
 }
+
+const workDir = path.dirname(path.resolve(chunksPath));
+if (!tracePath) tracePath = path.join(workDir, "trace.jsonl");
+
+// Startup: opportunistic trace compaction
+try { maybeCompactTrace(tracePath); } catch {}
 
 // =============================================================
 // 字幕分行（每行不超过 20 汉字）
@@ -121,14 +130,34 @@ function main() {
 
   const allShotSubtitles = {};
   let totalSubs = 0;
+  let chunkFailures = 0;
 
   for (const [shotId, shotChunks] of shotMap) {
     const chunksSubs = [];
 
     for (const chunk of shotChunks) {
+      const logFile = openStageLog(workDir, chunk.id, "p5");
+      const log = (msg) => {
+        console.log(msg);
+        appendStageLog(logFile, String(msg));
+      };
+      const logErr = (msg) => {
+        console.error(msg);
+        appendStageLog(logFile, String(msg));
+      };
+      const t0 = Date.now();
+      emitStageStart(tracePath, chunk.id, "p5", 1);
+
+      try {
       const transcriptPath = path.join(transcriptsDir, `${chunk.id}.json`);
       if (!fs.existsSync(transcriptPath)) {
-        console.error(`  [WARN] ${chunk.id}: transcript not found, skipping`);
+        const errMsg = `transcript not found: ${transcriptPath}`;
+        logErr(`  [WARN] ${chunk.id}: transcript not found, skipping`);
+        chunkFailures++;
+        emitStageEnd(tracePath, chunk.id, "p5", "fail", {
+          durationMs: Date.now() - t0,
+          error: errMsg,
+        });
         continue;
       }
 
@@ -137,15 +166,22 @@ function main() {
       // 用 WhisperX 的 segment 时间戳，文本用原始文稿
       // 策略：WhisperX segments 提供时间边界，原始文稿按行分配到这些时间窗口
       const segments = transcript.segments || [];
-      // 字幕文本：strip TTS 控制标记（[break]/[breath]/[long break]/phoneme）
+      // 字幕文本：strip TTS 控制标记（[break]/[breath]/[long break]/[pause]/[inhale]/phoneme）
+      // 统一规则：任何 [ascii letters/space/-] bracket tag 都视为控制标记
       const subtitleSource = (chunk.subtitle_text || chunk.text)
-        .replace(/\[(?:break|breath|long[ -]break)\]/g, "")
+        .replace(/\[[a-z][a-z\s-]{0,30}\]/gi, "")
         .replace(/<\|phoneme_start\|>.*?<\|phoneme_end\|>/g, "")
         .replace(/\s+/g, " ").trim();
       const originalLines = splitSubtitleLines(subtitleSource);
 
       if (segments.length === 0) {
-        console.error(`  [WARN] ${chunk.id}: no segments in transcript`);
+        const errMsg = `no segments in transcript`;
+        logErr(`  [WARN] ${chunk.id}: ${errMsg}`);
+        chunkFailures++;
+        emitStageEnd(tracePath, chunk.id, "p5", "fail", {
+          durationMs: Date.now() - t0,
+          error: errMsg,
+        });
         continue;
       }
 
@@ -222,6 +258,18 @@ function main() {
         subtitles,
       });
       totalSubs += subtitles.length;
+      log(`  ✓ ${chunk.id}: ${subtitles.length} subtitle lines`);
+      emitStageEnd(tracePath, chunk.id, "p5", "ok", {
+        durationMs: Date.now() - t0,
+      });
+      } catch (e) {
+        logErr(`  [ERROR] ${chunk.id}: ${e.message}`);
+        chunkFailures++;
+        emitStageEnd(tracePath, chunk.id, "p5", "fail", {
+          durationMs: Date.now() - t0,
+          error: e.message,
+        });
+      }
     }
 
     allShotSubtitles[shotId] = { chunks: chunksSubs };
@@ -233,6 +281,11 @@ function main() {
   const outPath = path.join(outdir, "subtitles.json");
   fs.writeFileSync(outPath, JSON.stringify(allShotSubtitles, null, 2));
   console.log(`\n=== Output: ${outPath} (${totalSubs} lines across ${shotMap.size} shots) ===`);
+
+  if (chunkFailures > 0) {
+    console.error(`\n✗ ${chunkFailures} chunk(s) failed during P5.`);
+    process.exit(1);
+  }
 }
 
 function round3(n) {

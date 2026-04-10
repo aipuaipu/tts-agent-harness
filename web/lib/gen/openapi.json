@@ -817,10 +817,10 @@
             ],
             "title": "Lasteditedat"
           },
-          "extra_metadata": {
+          "metadata": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Extra Metadata"
+            "title": "Metadata"
           },
           "takes": {
             "items": {
@@ -852,8 +852,7 @@
           "selectedTakeId",
           "boundaryHash",
           "charCount",
-          "lastEditedAt",
-          "extra_metadata"
+          "lastEditedAt"
         ],
         "title": "ChunkDetail",
         "description": "ChunkView extended with nested takes and stage_runs."
@@ -983,10 +982,10 @@
             ],
             "title": "Archivedat"
           },
-          "extra_metadata": {
+          "metadata": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Extra Metadata"
+            "title": "Metadata"
           },
           "chunks": {
             "items": {
@@ -1007,8 +1006,7 @@
           "config",
           "createdAt",
           "updatedAt",
-          "archivedAt",
-          "extra_metadata"
+          "archivedAt"
         ],
         "title": "EpisodeDetail",
         "description": "EpisodeView extended with nested chunks."
@@ -1144,10 +1142,10 @@
             ],
             "title": "Archivedat"
           },
-          "extra_metadata": {
+          "metadata": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Extra Metadata"
+            "title": "Metadata"
           }
         },
         "type": "object",
@@ -1160,8 +1158,7 @@
           "config",
           "createdAt",
           "updatedAt",
-          "archivedAt",
-          "extra_metadata"
+          "archivedAt"
         ],
         "title": "EpisodeView"
       },

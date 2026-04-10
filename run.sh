@@ -59,8 +59,16 @@ if [[ -f "$HASH_FILE" ]] && [[ "$(cat "$HASH_FILE")" != "$SCRIPT_HASH" ]]; then
 fi
 echo "$SCRIPT_HASH" > "$HASH_FILE"
 
-# Only clear trace on fresh run (--from p1)
-if [[ "$FROM_STEP" == "p1" ]]; then
+# trace.jsonl is APPEND-ONLY across runs.
+#
+# The derivation logic uses "last stage.start event wins", so re-running an
+# already-done episode:
+#   - Stages that re-execute emit new events that override the old state.
+#   - Stages that skip (no matching chunks) leave previous events intact, so
+#     their pipeline pills stay green instead of resetting to pending.
+#
+# Only initialize the file if it doesn't exist yet (first-ever run).
+if [[ ! -f "$TRACE" ]]; then
   > "$TRACE"
 fi
 
@@ -111,24 +119,53 @@ if should_run check2; then
 fi
 
 # --- P3: WhisperX Agent (start server, batch transcribe) ---
-P3_PORT=5555
+# 读取 .harness/config.json 中的 p3.port / p3.workers / p3.auto_workers
+P3_CFG=$(node -e "
+  const fs=require('fs');
+  const path=require('path');
+  const p=path.join('$HARNESS_DIR','.harness','config.json');
+  let cfg={};
+  try { cfg=JSON.parse(fs.readFileSync(p,'utf-8')).p3||{}; } catch(e){}
+  const port = cfg.port || 5555;
+  const workers = (cfg.workers && Number.isInteger(cfg.workers) && cfg.workers>=1) ? cfg.workers : 1;
+  const auto = !!cfg.auto_workers;
+  process.stdout.write(port+' '+workers+' '+(auto?'1':'0'));
+" 2>/dev/null || echo "5555 1 0")
+P3_PORT=$(echo "$P3_CFG" | awk '{print $1}')
+P3_WORKERS=$(echo "$P3_CFG" | awk '{print $2}')
+P3_AUTO=$(echo "$P3_CFG" | awk '{print $3}')
+
+if [[ "$P3_AUTO" == "1" ]]; then
+  # auto_workers: 让脚本把说明打到 stderr，只捕获 stdout 的整数
+  P3_WORKERS=$(node "$HARNESS_DIR/scripts/p3-recommend-workers.js" --verbose)
+fi
+
 P3_PID=""
 
 if should_run p3; then
   echo ""
-  echo "=== P3: Starting WhisperX Agent Server (port $P3_PORT) ==="
-  source "$HARNESS_DIR/scripts/start-p3-server.sh" "$P3_PORT" "$VENV" "$HARNESS_DIR/scripts/p3-transcribe.py" "$WORK_DIR"
+  echo "=== P3: Starting WhisperX Agent Server (base_port=$P3_PORT, workers=$P3_WORKERS) ==="
+  source "$HARNESS_DIR/scripts/start-p3-server.sh" "$P3_PORT" "$VENV" "$HARNESS_DIR/scripts/p3-transcribe.py" "$WORK_DIR" "$P3_WORKERS"
 fi
 
 # --- P3: Batch transcribe via server ---
 if should_run p3; then
   echo ""
   echo "=== P3: Batch Transcription (via HTTP) ==="
+  # 构建 P3_URLS（start-p3-server.sh 已 export，但 check3 分支也要用，显式重建以防万一）
+  if [[ -z "${P3_URLS:-}" ]]; then
+    _urls=""
+    for ((i=0; i<P3_WORKERS; i++)); do
+      _p=$((P3_PORT + i))
+      if [[ -z "$_urls" ]]; then _urls="http://127.0.0.1:$_p"; else _urls="$_urls,http://127.0.0.1:$_p"; fi
+    done
+    P3_URLS="$_urls"
+  fi
   python "$HARNESS_DIR/scripts/p3-transcribe.py" \
     --chunks "$CHUNKS" \
     --audiodir "$AUDIO_DIR" \
     --outdir "$TRANSCRIPT_DIR" \
-    --server-url "http://127.0.0.1:$P3_PORT"
+    --server-urls "$P3_URLS"
 fi
 
 # --- Post-P3 deterministic pre-check ---
@@ -141,7 +178,7 @@ if should_run check3; then
 fi
 
 # --- Shutdown P3 server ---
-source "$HARNESS_DIR/scripts/stop-p3-server.sh" "$WORK_DIR" "$P3_PORT"
+source "$HARNESS_DIR/scripts/stop-p3-server.sh" "$WORK_DIR" "$P3_PORT" "$P3_WORKERS"
 
 # --- P5: Deterministic subtitle generation ---
 if should_run p5; then
@@ -182,17 +219,13 @@ if should_run v2; then
     --subtitles "$SUBTITLES" \
     --output "$PREVIEW"
 
-  # Trace summary
-  if [[ -s "$TRACE" ]]; then
-    echo ""
-    echo "=== Pipeline Trace Summary ==="
-    node -e "require('$HARNESS_DIR/scripts/trace.js').summary('$TRACE')"
-  fi
-
   echo ""
-  echo ">>> V2 Review: Open preview in browser <<<"
-  echo "    open $PREVIEW"
-  open "$PREVIEW" 2>/dev/null || true
+  echo ">>> V2 Review: preview.html generated <<<"
+  echo "    $PREVIEW"
+  # 只在交互式终端自动 open；web UI / CI 调用时 stdout 不是 tty，跳过
+  if [[ -t 1 ]]; then
+    open "$PREVIEW" 2>/dev/null || true
+  fi
 fi
 
 # --- Copy to external output dir ---

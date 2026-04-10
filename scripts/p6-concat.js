@@ -173,9 +173,14 @@ function main() {
         for (const sub of chunkEntry.subtitles) {
           flatSubs.push({
             id: sub.id,
+            chunk_id: chunkEntry.chunk_id,
             text: sub.text,
+            // shot-level time (for Remotion / v2-preview / postcheck)
             start: Math.round((sub.start + chunkOffset) * 1000) / 1000,
             end: Math.round((sub.end + chunkOffset) * 1000) / 1000,
+            // chunk-relative time (for per-chunk web playback)
+            chunk_rel_start: sub.start,
+            chunk_rel_end: sub.end,
           });
         }
 

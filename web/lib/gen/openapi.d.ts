@@ -273,8 +273,8 @@ export interface components {
             charCount: number;
             /** Lasteditedat */
             lastEditedAt: string | null;
-            /** Extra Metadata */
-            extra_metadata: {
+            /** Metadata */
+            metadata?: {
                 [key: string]: unknown;
             };
             /**
@@ -346,8 +346,8 @@ export interface components {
             updatedAt: string;
             /** Archivedat */
             archivedAt: string | null;
-            /** Extra Metadata */
-            extra_metadata: {
+            /** Metadata */
+            metadata?: {
                 [key: string]: unknown;
             };
             /**
@@ -418,8 +418,8 @@ export interface components {
             updatedAt: string;
             /** Archivedat */
             archivedAt: string | null;
-            /** Extra Metadata */
-            extra_metadata: {
+            /** Metadata */
+            metadata?: {
                 [key: string]: unknown;
             };
         };

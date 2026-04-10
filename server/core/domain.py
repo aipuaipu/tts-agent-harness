@@ -167,7 +167,7 @@ class ChunkView(_ORM):
     boundary_hash: str | None
     char_count: int
     last_edited_at: datetime | None
-    extra_metadata: dict[str, Any] = Field(alias="extra_metadata")
+    extra_metadata: dict[str, Any] = Field(default_factory=dict, serialization_alias="metadata")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -182,7 +182,7 @@ class EpisodeView(_ORM):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
-    extra_metadata: dict[str, Any] = Field(alias="extra_metadata")
+    extra_metadata: dict[str, Any] = Field(default_factory=dict, serialization_alias="metadata")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
