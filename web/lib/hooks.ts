@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import useSWR from "swr";
 import type { Episode, EpisodeSummary, ChunkEdit } from "./types";
 import {
@@ -7,14 +8,41 @@ import {
   fixtureEpisodes,
   fixtureLogTail,
 } from "./__fixtures__/ch04";
+import { apiGet, apiPost, apiPostForm, getApiUrl } from "./adapters/api/http-client";
+import type { RawEpisodeDetail, RawEpisodeSummary } from "./adapters/api/mappers";
+import { mapEpisodeDetail, mapEpisodeSummary } from "./adapters/api/mappers";
+import { connectSSE } from "./sse-client";
+import type { StageEventData } from "./sse-client";
 
 const USE_FIXTURES = process.env.NEXT_PUBLIC_USE_FIXTURES === "1";
 
-const fetcher = (url: string) =>
-  fetch(url).then((r) => {
-    if (!r.ok) throw new Error(`${r.status}`);
-    return r.json();
-  });
+// ---------------------------------------------------------------------------
+// SWR fetcher — calls FastAPI directly
+// ---------------------------------------------------------------------------
+
+const episodeListFetcher = async (): Promise<EpisodeListResponse> => {
+  const raw = await apiGet<RawEpisodeSummary[]>("/episodes");
+  return { episodes: raw.map(mapEpisodeSummary) };
+};
+
+const episodeDetailFetcher = async (
+  id: string,
+): Promise<EpisodeDetailResponse> => {
+  const raw = await apiGet<RawEpisodeDetail>(
+    `/episodes/${encodeURIComponent(id)}`,
+  );
+  const episode = mapEpisodeDetail(raw);
+  return {
+    episode,
+    logTail: [],
+    running: raw.status === "running",
+    currentStage: episode.currentStage,
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 export interface EpisodeDetailResponse {
   episode: Episode;
@@ -34,11 +62,14 @@ interface HookResult<T> {
   mutate: () => Promise<unknown>;
 }
 
+// ---------------------------------------------------------------------------
+// Hooks
+// ---------------------------------------------------------------------------
+
 export function useEpisodes(): HookResult<EpisodeListResponse> {
-  // hooks must always be called; in fixture mode we pass null key to disable fetch
   const swr = useSWR<EpisodeListResponse>(
-    USE_FIXTURES ? null : "/api/episodes",
-    fetcher,
+    USE_FIXTURES ? null : "api:episodes",
+    () => episodeListFetcher(),
   );
   if (USE_FIXTURES) {
     return {
@@ -60,12 +91,32 @@ export function useEpisode(
   id: string | null,
 ): HookResult<EpisodeDetailResponse> {
   const swr = useSWR<EpisodeDetailResponse>(
-    USE_FIXTURES || !id ? null : `/api/episodes/${id}`,
-    fetcher,
+    USE_FIXTURES || !id ? null : `api:episode:${id}`,
+    () => episodeDetailFetcher(id!),
     {
       refreshInterval: (data) => (data?.running ? 2000 : 0),
     },
   );
+
+  // SSE real-time updates — connect when viewing an episode
+  const mutate = swr.mutate;
+  useEffect(() => {
+    if (USE_FIXTURES || !id) return;
+
+    const conn = connectSSE(
+      id,
+      (_event: StageEventData) => {
+        // On any stage event, re-fetch the episode data to get latest state
+        mutate();
+      },
+      () => {
+        // On SSE error, silently ignore — SWR polling is the fallback
+      },
+    );
+
+    return () => conn.close();
+  }, [id, mutate]);
+
   if (USE_FIXTURES) {
     if (!id) {
       return {
@@ -105,7 +156,7 @@ export function useEpisode(
 }
 
 // ============================================================
-// Mutations
+// Mutations — call FastAPI directly
 // ============================================================
 
 export async function runEpisode(id: string) {
@@ -113,10 +164,10 @@ export async function runEpisode(id: string) {
     await new Promise((r) => setTimeout(r, 1500));
     return { jobId: "fake", startedAt: new Date().toISOString() };
   }
-  const r = await fetch(`/api/episodes/${id}/run`, { method: "POST" });
-  if (r.status === 409) throw new Error("busy");
-  if (!r.ok) throw new Error(`${r.status}`);
-  return r.json();
+  const res = await apiPost<{ flow_run_id: string }>(
+    `/episodes/${encodeURIComponent(id)}/run`,
+  );
+  return { jobId: res.flow_run_id, startedAt: new Date().toISOString() };
 }
 
 export async function applyEdits(
@@ -127,14 +178,28 @@ export async function applyEdits(
     await new Promise((r) => setTimeout(r, 1500));
     return { jobId: "fake", startedAt: new Date().toISOString() };
   }
-  const r = await fetch(`/api/episodes/${id}/apply`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ edits }),
-  });
-  if (r.status === 409) throw new Error("busy");
-  if (!r.ok) throw new Error(`${r.status}`);
-  return r.json();
+  // Apply edits per-chunk then retry
+  const entries = Object.entries(edits);
+  let lastFlowRunId = "noop";
+  for (const [cid, edit] of entries) {
+    // 1. Edit the chunk text
+    const body: Record<string, unknown> = {};
+    if (edit.textNormalized !== undefined) body.text_normalized = edit.textNormalized;
+    if (edit.subtitleText !== undefined) body.subtitle_text = edit.subtitleText;
+    await apiPost(
+      `/episodes/${encodeURIComponent(id)}/chunks/${encodeURIComponent(cid)}/edit`,
+      body,
+    );
+
+    // 2. Trigger retry from appropriate stage
+    const fromStage = edit.textNormalized !== undefined ? "p2" : "p5";
+    const res = await apiPost<{ flow_run_id: string }>(
+      `/episodes/${encodeURIComponent(id)}/chunks/${encodeURIComponent(cid)}/retry`,
+      { from_stage: fromStage, cascade: true },
+    );
+    lastFlowRunId = res.flow_run_id;
+  }
+  return { jobId: lastFlowRunId, startedAt: new Date().toISOString() };
 }
 
 export async function retryChunk(id: string, cid: string, count: number) {
@@ -142,13 +207,11 @@ export async function retryChunk(id: string, cid: string, count: number) {
     await new Promise((r) => setTimeout(r, count * 800));
     return { jobId: "fake", startedAt: new Date().toISOString() };
   }
-  const r = await fetch(
-    `/api/episodes/${id}/chunks/${cid}/retry?count=${count}`,
-    { method: "POST" },
+  const res = await apiPost<{ flow_run_id: string }>(
+    `/episodes/${encodeURIComponent(id)}/chunks/${encodeURIComponent(cid)}/retry`,
+    { from_stage: "p2", cascade: true },
   );
-  if (r.status === 409) throw new Error("busy");
-  if (!r.ok) throw new Error(`${r.status}`);
-  return r.json();
+  return { jobId: res.flow_run_id, startedAt: new Date().toISOString() };
 }
 
 export async function exportEpisode(id: string, targetDir: string) {
@@ -156,13 +219,8 @@ export async function exportEpisode(id: string, targetDir: string) {
     await new Promise((r) => setTimeout(r, 500));
     return { filesCopied: 8, totalBytes: 0 };
   }
-  const r = await fetch(`/api/episodes/${id}/export`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ targetDir }),
-  });
-  if (!r.ok) throw new Error(`${r.status}`);
-  return r.json();
+  // No direct export endpoint on FastAPI yet — throw informative error
+  throw new Error("Export not yet available via API backend");
 }
 
 export async function createEpisode(id: string, file: File) {
@@ -173,9 +231,8 @@ export async function createEpisode(id: string, file: File) {
   const fd = new FormData();
   fd.append("id", id);
   fd.append("script", file);
-  const r = await fetch("/api/episodes", { method: "POST", body: fd });
-  if (!r.ok) throw new Error(`${r.status}`);
-  return r.json();
+  const raw = await apiPostForm<RawEpisodeDetail>("/episodes", fd);
+  return { id: raw.id, status: raw.status };
 }
 
 // audio URL helper
@@ -185,5 +242,8 @@ export function getAudioUrl(
   takeId: string,
 ): string {
   if (USE_FIXTURES) return "";
-  return `/api/audio/${epId}/${cid}/${takeId}`;
+  // In API mode, audio files are stored in MinIO.
+  // The FastAPI backend would serve them or provide presigned URLs.
+  // For now, construct a URL that could be proxied.
+  return `${getApiUrl()}/episodes/${encodeURIComponent(epId)}/chunks/${encodeURIComponent(cid)}/audio/${encodeURIComponent(takeId)}`;
 }
