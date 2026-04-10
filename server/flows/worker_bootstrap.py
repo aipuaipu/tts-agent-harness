@@ -99,8 +99,16 @@ def bootstrap() -> None:
         storage=_storage,
     )
 
-    # P1 and P6 use different DI patterns — they are wired via
-    # get_p1_context() and the p6_concat task's own defaults.
+    # P6
+    from server.flows.tasks.p6_concat import configure_p6_dependencies
+
+    configure_p6_dependencies(
+        session_factory=_session_factory,
+        storage=_storage,
+    )
+
+    # P1 uses a different DI pattern (P1Context dataclass) — wired via
+    # get_p1_context() below.
 
     _bootstrapped = True
     log.info("worker_bootstrap: all task dependencies configured")

@@ -42,25 +42,9 @@ from server.core.domain import P1Result
 from server.core.events import write_event
 from server.core.models import Chunk
 from server.core.p1_logic import script_to_chunks
+from server.core.domain import DomainError
 from server.core.repositories import ChunkRepo, EpisodeRepo
 from server.core.storage import MinIOStorage, episode_script_key
-
-
-class DomainError(Exception):
-    """Raised for P1-level contract violations that should abort the run.
-
-    The ``code`` attribute is machine-readable and is safe to expose in the
-    Prefect failure message / events payload. Allowed codes:
-
-    * ``"not_found"`` — episode row or script object missing.
-    * ``"invalid_input"`` — script.json is not valid JSON / wrong shape.
-    * ``"invalid_state"`` — e.g. the episode is not in a state from which
-      P1 can legally run (currently unused; reserved for the W3 integrator).
-    """
-
-    def __init__(self, code: str, message: str | None = None) -> None:
-        self.code = code
-        super().__init__(message or code)
 
 
 @dataclass(frozen=True)

@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager  # kept for potential future use
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
@@ -66,14 +66,41 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _default_database_url() -> str:
-    return os.getenv(
+# ---------------------------------------------------------------------------
+# Module-level DI (consistent with P2/P3/P5 pattern).
+# Call ``configure_p6_dependencies(...)`` once at worker startup.
+# ---------------------------------------------------------------------------
+
+_SESSION_FACTORY: async_sessionmaker | None = None
+_STORAGE: MinIOStorage | None = None
+
+
+def configure_p6_dependencies(
+    *,
+    session_factory: async_sessionmaker,
+    storage: MinIOStorage,
+) -> None:
+    """Inject shared DB + MinIO handles. Called once by worker_bootstrap."""
+    global _SESSION_FACTORY, _STORAGE
+    _SESSION_FACTORY = session_factory
+    _STORAGE = storage
+
+
+def _get_session_factory() -> async_sessionmaker:
+    if _SESSION_FACTORY is not None:
+        return _SESSION_FACTORY
+    # Fallback: create from env (keeps standalone dev mode working)
+    url = os.getenv(
         "DATABASE_URL",
         "postgresql+asyncpg://harness:harness@localhost:55432/harness",
     )
+    return async_sessionmaker(create_async_engine(url, future=True), expire_on_commit=False)
 
 
-def _default_storage() -> MinIOStorage:
+def _get_storage() -> MinIOStorage:
+    if _STORAGE is not None:
+        return _STORAGE
+    # Fallback: create from env
     return MinIOStorage(
         endpoint=os.getenv("MINIO_ENDPOINT", "localhost:59000"),
         access_key=os.getenv("MINIO_ACCESS_KEY", "minioadmin"),
@@ -81,19 +108,6 @@ def _default_storage() -> MinIOStorage:
         bucket=os.getenv("MINIO_BUCKET", "tts-harness"),
         secure=os.getenv("MINIO_SECURE", "false").lower() == "true",
     )
-
-
-@asynccontextmanager
-async def _session_scope(
-    database_url: str | None = None,
-) -> AsyncIterator[AsyncSession]:
-    engine = create_async_engine(database_url or _default_database_url(), future=True)
-    maker = async_sessionmaker(engine, expire_on_commit=False)
-    try:
-        async with maker() as sess:
-            yield sess
-    finally:
-        await engine.dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -310,8 +324,9 @@ async def p6_concat(
     shot_gap_ms: int = 500,
 ) -> P6Result:
     """Prefect entry point. Owns DB session + MinIO client lifecycle."""
-    storage = _default_storage()
-    async with _session_scope() as session:
+    storage = _get_storage()
+    factory = _get_session_factory()
+    async with factory() as session:
         return await run_p6_concat(
             episode_id,
             padding_ms=padding_ms,
