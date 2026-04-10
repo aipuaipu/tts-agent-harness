@@ -212,7 +212,7 @@ class TestEpisodeCRUD:
         data = resp.json()
         chunk0 = data["chunks"][0]
         assert "takes" in chunk0
-        assert "stage_runs" in chunk0
+        assert "stageRuns" in chunk0
         assert len(chunk0["takes"]) == 1
         assert chunk0["takes"][0]["id"] == "take-001"
 
@@ -234,7 +234,7 @@ class TestRunEpisode:
         resp = await seeded_client.post("/episodes/ep-test/run")
         assert resp.status_code == 200
         data = resp.json()
-        assert "flow_run_id" in data
+        assert "flowRunId" in data
 
     async def test_trigger_run_not_found(self, client: AsyncClient):
         resp = await client.post("/episodes/nope/run")
@@ -253,7 +253,7 @@ class TestChunkEdit:
         # Verify via GET
         resp2 = await seeded_client.get("/episodes/ep-test")
         chunk = resp2.json()["chunks"][0]
-        assert chunk["text_normalized"] == "modified text"
+        assert chunk["textNormalized"] == "modified text"
 
     async def test_edit_chunk_not_found(self, client: AsyncClient):
         resp = await client.post(
@@ -270,7 +270,7 @@ class TestChunkRetry:
             params={"from_stage": "p2"},
         )
         assert resp.status_code == 200
-        assert "flow_run_id" in resp.json()
+        assert "flowRunId" in resp.json()
 
     async def test_retry_chunk_not_found(self, client: AsyncClient):
         resp = await client.post(
@@ -286,7 +286,7 @@ class TestFinalizeTake:
             params={"take_id": "take-001"},
         )
         assert resp.status_code == 200
-        assert "flow_run_id" in resp.json()
+        assert "flowRunId" in resp.json()
 
     async def test_finalize_take_not_found(self, seeded_client: AsyncClient):
         resp = await seeded_client.post(
@@ -456,8 +456,8 @@ class TestArchiveEpisode:
         resp = await seeded_client.post("/episodes/ep-test/archive")
         assert resp.status_code == 200
         data = resp.json()
-        assert "archived_at" in data
-        assert data["archived_at"] is not None
+        assert "archivedAt" in data
+        assert data["archivedAt"] is not None
 
     async def test_archive_not_found(self, client: AsyncClient):
         resp = await client.post("/episodes/nope/archive")
@@ -508,7 +508,7 @@ class TestChunkLog:
         assert resp.status_code == 200
         data = resp.json()
         assert data["stage"] == "p2"
-        assert data["chunk_id"] == "ep-test:shot01:0"
+        assert data["chunkId"] == "ep-test:shot01:0"
         assert "P2 synth" in data["content"]
 
     async def test_get_chunk_log_no_stage_run(self, seeded_client: AsyncClient):

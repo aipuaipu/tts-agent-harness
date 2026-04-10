@@ -179,5 +179,5 @@ async def test_retry_via_api(api_client: AsyncClient, storage: MinIOStorage):
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert "flow_run_id" in body
-    assert body["flow_run_id"] != ""
+    assert "flowRunId" in body
+    assert body["flowRunId"] != ""

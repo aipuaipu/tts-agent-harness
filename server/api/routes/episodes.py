@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from minio.error import S3Error
 from pydantic import BaseModel
+from server.core.domain import _CamelBase
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.core.domain import (
@@ -56,41 +57,41 @@ class EpisodeDetail(EpisodeView):
     chunks: list[ChunkDetail] = []
 
 
-class RunResponse(BaseModel):
+class RunResponse(_CamelBase):
     flow_run_id: str
 
 
-class RetryResponse(BaseModel):
+class RetryResponse(_CamelBase):
     flow_run_id: str
 
 
-class FinalizeResponse(BaseModel):
+class FinalizeResponse(_CamelBase):
     flow_run_id: str
 
 
-class EditResponse(BaseModel):
+class EditResponse(_CamelBase):
     updated: int
 
 
-class DeleteResponse(BaseModel):
+class DeleteResponse(_CamelBase):
     deleted: bool
 
 
-class DuplicateRequest(BaseModel):
+class DuplicateRequest(_CamelBase):
     new_id: str
 
 
-class ArchiveResponse(BaseModel):
+class ArchiveResponse(_CamelBase):
     archived_at: datetime
 
 
-class ChunkLogResponse(BaseModel):
+class ChunkLogResponse(_CamelBase):
     content: str
     stage: str
     chunk_id: str
 
 
-class EpisodeLogsResponse(BaseModel):
+class EpisodeLogsResponse(_CamelBase):
     lines: list[str]
 
 

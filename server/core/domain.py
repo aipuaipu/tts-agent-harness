@@ -19,6 +19,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 # ---------------------------------------------------------------------------
 # Common type aliases
@@ -55,10 +56,23 @@ class DomainError(Exception):
         self.message = message or code
 
 
-class _ORM(BaseModel):
+class _CamelBase(BaseModel):
+    """Base for all API-facing models. Serializes to camelCase for OpenAPI/JSON."""
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,  # Python code still uses snake_case
+    )
+
+
+class _ORM(_CamelBase):
     """Base class for ORM-backed read models."""
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +80,7 @@ class _ORM(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class EpisodeCreate(BaseModel):
+class EpisodeCreate(_CamelBase):
     """Input for creating a new episode."""
 
     id: str
@@ -77,7 +91,7 @@ class EpisodeCreate(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class ChunkInput(BaseModel):
+class ChunkInput(_CamelBase):
     """Shape consumed by P1 → DB (one row per chunk)."""
 
     id: str
@@ -92,7 +106,7 @@ class ChunkInput(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class ChunkEdit(BaseModel):
+class ChunkEdit(_CamelBase):
     """User edit applied to a chunk. All fields optional — sparse update."""
 
     chunk_id: str
@@ -102,7 +116,7 @@ class ChunkEdit(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
-class TakeAppend(BaseModel):
+class TakeAppend(_CamelBase):
     """Payload for appending a new take after a P2 synth."""
 
     id: str
@@ -173,7 +187,7 @@ class EpisodeView(_ORM):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
-class EpisodeSummary(BaseModel):
+class EpisodeSummary(_CamelBase):
     """Aggregated view for listing pages."""
 
     id: str
@@ -190,12 +204,12 @@ class EpisodeSummary(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class P1Result(BaseModel):
+class P1Result(_CamelBase):
     episode_id: str
     chunks: list[ChunkInput]
 
 
-class P2Result(BaseModel):
+class P2Result(_CamelBase):
     chunk_id: str
     take_id: str
     audio_uri: str
@@ -203,7 +217,7 @@ class P2Result(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
-class FishTTSParams(BaseModel):
+class FishTTSParams(_CamelBase):
     """Full parameter surface for a Fish Audio TTS S2-Pro call.
 
     Defaults are safe production values. Overrides flow in from
@@ -223,19 +237,19 @@ class FishTTSParams(BaseModel):
     chunk_length: int = 200
 
 
-class P3Result(BaseModel):
+class P3Result(_CamelBase):
     chunk_id: str
     transcript_uri: str
     word_count: int
 
 
-class P5Result(BaseModel):
+class P5Result(_CamelBase):
     chunk_id: str
     subtitle_uri: str
     line_count: int = 0
 
 
-class WhisperXWord(BaseModel):
+class WhisperXWord(_CamelBase):
     """Single word-level timestamp emitted by the WhisperX service.
 
     ``score`` is optional because forced-aligned words without a confidence
@@ -249,7 +263,7 @@ class WhisperXWord(BaseModel):
     score: float | None = None
 
 
-class WhisperXTranscript(BaseModel):
+class WhisperXTranscript(_CamelBase):
     """Shape of ``transcript.json`` produced by the WhisperX HTTP service.
 
     Only the fields consumed by P5 are modelled; anything else is permitted
@@ -264,7 +278,7 @@ class WhisperXTranscript(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-class P6Result(BaseModel):
+class P6Result(_CamelBase):
     """Episode-level concat result emitted by the P6 task.
 
     Field names match the A7-P6 agent contract (``wav_uri`` / ``srt_uri`` /
@@ -285,7 +299,7 @@ class P6Result(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class StageEvent(BaseModel):
+class StageEvent(_CamelBase):
     """Event broadcast on the `episode_events` NOTIFY channel.
 
     The ``id`` field is assigned by the DB (bigserial); the producer code
