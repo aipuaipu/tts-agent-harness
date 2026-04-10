@@ -395,7 +395,20 @@ async def run_episode(
         async def _run_dev():
             """Dev mode: run pipeline stages directly (no Prefect decorators)."""
             import logging
+            from datetime import datetime, timezone
             _log = logging.getLogger("dev_runner")
+
+            async def _mark_stage(cid: str, stage: str, status: str, error: str | None = None, started: datetime | None = None):
+                """Write stage_run record so frontend sees per-chunk progress."""
+                from server.core.repositories import StageRunRepo
+                async with _session_factory() as s:
+                    await StageRunRepo(s).upsert(
+                        chunk_id=cid, stage=stage, status=status,
+                        started_at=started, finished_at=datetime.now(timezone.utc) if status in ("ok", "failed") else None,
+                        error=error,
+                    )
+                    await s.commit()
+
             try:
                 from server.core.repositories import ChunkRepo, EpisodeRepo
                 from server.flows.worker_bootstrap import _session_factory, _storage
@@ -440,21 +453,43 @@ async def run_episode(
                         chunk_obj = next((c for c in target if c.id == cid), None)
                         if chunk_obj and chunk_obj.selected_take_id:
                             _log.info("P2 skip %s (has take)", cid)
+                            await _mark_stage(cid, "p2", "ok")
                             continue
                     _log.info("P2 synth %s", cid)
-                    await run_p2_synth(cid, params=p2_params)
+                    t0 = datetime.now(timezone.utc)
+                    await _mark_stage(cid, "p2", "running", started=t0)
+                    try:
+                        await run_p2_synth(cid, params=p2_params)
+                        await _mark_stage(cid, "p2", "ok", started=t0)
+                    except Exception as e:
+                        await _mark_stage(cid, "p2", "failed", error=str(e), started=t0)
+                        raise
 
                 # P3: transcribe
                 from server.flows.tasks.p3_transcribe import run_p3_transcribe
                 for cid in target_ids:
                     _log.info("P3 transcribe %s", cid)
-                    await run_p3_transcribe(cid)
+                    t0 = datetime.now(timezone.utc)
+                    await _mark_stage(cid, "p3", "running", started=t0)
+                    try:
+                        await run_p3_transcribe(cid)
+                        await _mark_stage(cid, "p3", "ok", started=t0)
+                    except Exception as e:
+                        await _mark_stage(cid, "p3", "failed", error=str(e), started=t0)
+                        raise
 
                 # P5: subtitles
                 from server.flows.tasks.p5_subtitles import run_p5_subtitles
                 for cid in target_ids:
                     _log.info("P5 subtitle %s", cid)
-                    await run_p5_subtitles(cid)
+                    t0 = datetime.now(timezone.utc)
+                    await _mark_stage(cid, "p5", "running", started=t0)
+                    try:
+                        await run_p5_subtitles(cid)
+                        await _mark_stage(cid, "p5", "ok", started=t0)
+                    except Exception as e:
+                        await _mark_stage(cid, "p5", "failed", error=str(e), started=t0)
+                        raise
 
                 # P6: concat
                 from server.flows.tasks.p6_concat import run_p6_concat
