@@ -1,14 +1,18 @@
 /**
  * Service factory — sole place adapters are wired.
  *
- * Route Handlers call getServices() to obtain singleton instances.
- * Swapping adapters (e.g. SQLite or Node orchestrator) only touches this file.
+ * Now uses API adapters that call FastAPI (:8000) directly.
+ * Legacy adapters are preserved in adapters/legacy/ but not imported.
+ *
+ * Route Handlers still call getServices(); the API adapter implementations
+ * will forward to FastAPI, making the Route Handlers thin proxies.
  */
 
 import type {
   AudioService,
   ChunkStore,
   EpisodeStore,
+  ExportResult,
   ExportService,
   LockManager,
   LogTailer,
@@ -18,16 +22,53 @@ import type {
 } from "./ports";
 
 import {
-  FileLogTailer,
-  InMemoryLockManager,
-  LegacyAudioService,
-  LegacyChunkStore,
-  LegacyEpisodeStore,
-  LegacyExportService,
-  LegacyPipelineRunner,
-  LegacyPreviewService,
-  StdoutProgressSource,
-} from "./adapters/legacy";
+  ApiChunkStore,
+  ApiEpisodeStore,
+  ApiLogTailer,
+  ApiPipelineRunner,
+  ApiProgressSource,
+} from "./adapters/api";
+
+// ---------------------------------------------------------------------------
+// Stub implementations for ports with no backend API yet
+// ---------------------------------------------------------------------------
+
+class StubLockManager implements LockManager {
+  async acquire() {
+    return { release: async () => {} };
+  }
+  async isBusy() {
+    return false;
+  }
+  async list() {
+    return [];
+  }
+}
+
+class StubAudioService implements AudioService {
+  async getTakeFile(): Promise<string> {
+    throw new Error("not implemented: audio files are served from MinIO");
+  }
+  async getShotFile(): Promise<string> {
+    throw new Error("not implemented: audio files are served from MinIO");
+  }
+}
+
+class StubPreviewService implements PreviewService {
+  async getPreviewFile(): Promise<string> {
+    throw new Error("not implemented: preview served from FastAPI");
+  }
+}
+
+class StubExportService implements ExportService {
+  async exportTo(): Promise<ExportResult> {
+    throw new Error("not implemented: export via FastAPI");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Services interface & factory
+// ---------------------------------------------------------------------------
 
 export interface Services {
   episodes: EpisodeStore;
@@ -47,17 +88,17 @@ let _services: Services | null = null;
 export function getServices(): Services {
   if (_services) return _services;
 
-  const locks = new InMemoryLockManager();
-  const chunks = new LegacyChunkStore();
-  const episodes = new LegacyEpisodeStore(chunks);
-  const logs = new FileLogTailer();
-  const progress = new StdoutProgressSource();
-  const runner = new LegacyPipelineRunner(chunks, locks);
-  const audio = new LegacyAudioService(chunks);
-  const preview = new LegacyPreviewService();
-  const exportSvc = new LegacyExportService();
+  const episodes = new ApiEpisodeStore();
+  const chunks = new ApiChunkStore();
+  const runner = new ApiPipelineRunner();
+  const locks = new StubLockManager();
+  const progress = new ApiProgressSource();
+  const logs = new ApiLogTailer();
+  const audio = new StubAudioService();
+  const preview = new StubPreviewService();
+  const exportSvc = new StubExportService();
 
-  _services = {
+  const services: Services = {
     episodes,
     chunks,
     runner,
@@ -69,7 +110,8 @@ export function getServices(): Services {
     export: exportSvc,
   };
 
-  return _services;
+  _services = services;
+  return services;
 }
 
 /** Test helper — replace or reset the singleton. */
