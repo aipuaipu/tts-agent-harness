@@ -1,7 +1,7 @@
 "use client";
 
 import type { StageName, StageRun } from "@/lib/types";
-import { Sheet, SheetContent, SheetHeader, SheetClose } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetClose } from "@/components/ui/sheet";
 
 interface StageContext {
   request?: Record<string, unknown>;
@@ -56,6 +56,7 @@ export function StageLogDrawer({
     <Sheet open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <SheetContent side="right">
         <SheetHeader>
+          <SheetTitle className="sr-only">{STAGE_LABELS[stage]} — {chunkId}</SheetTitle>
           <span className="font-mono text-xs text-neutral-700">{chunkId}</span>
           <span className="text-neutral-300">·</span>
           <span className="font-mono text-xs font-semibold">{STAGE_LABELS[stage]}</span>
