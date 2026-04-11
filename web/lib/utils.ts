@@ -6,7 +6,8 @@
 /** Strip S2-Pro 控制标记,供字幕显示用。与 P5 脚本的行为一致。 */
 export function stripControlMarkers(text: string | null | undefined): string {
   return String(text ?? "")
-    .replace(/\[(?:break|breath|long[ -]break)\]/g, " ")
+    // Strip all [...] control markers (break/breath/pause/phoneme etc.)
+    .replace(/\[[^\[\]]*\]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
