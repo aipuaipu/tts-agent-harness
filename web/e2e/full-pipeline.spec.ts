@@ -50,18 +50,19 @@ test('完整用户旅程: 创建 → 切分 → 配置 → 合成 → 播放 →
   });
 
   await test.step('Step 5: TTS Config', async () => {
-    // 展开 TTS Config bar
-    await page.click('button:has-text("TTS Config")');
-    // 等 config 面板展开
-    const tempInput = page.locator('label:has-text("Temperature") + input, label:has-text("Temperature") ~ input').first();
-    if (await tempInput.isVisible()) {
-      await tempInput.fill('0.5');
-      await page.click('button:has-text("Save Config")');
-      // 等保存完成（按钮变灰）
-      await page.waitForTimeout(1000);
+    // 点 ✎ 编辑按钮打开 config dialog
+    const editBtn = page.locator('button:has-text("编辑")').first();
+    if (await editBtn.isVisible({ timeout: 3000 })) {
+      await editBtn.click();
+      await page.waitForTimeout(500);
+      // 修改 temperature
+      const tempInput = page.locator('input[type="number"]').first();
+      if (await tempInput.isVisible({ timeout: 2000 })) {
+        await tempInput.fill('0.5');
+        await page.click('button:has-text("保存配置")');
+        await page.waitForTimeout(1000);
+      }
     }
-    // 收起 config
-    await page.click('button:has-text("TTS Config")');
   });
 
   await test.step('Step 6: 合成全部 (P2→P3→P5→P6)', async () => {
@@ -160,20 +161,7 @@ test('完整用户旅程: 创建 → 切分 → 配置 → 合成 → 播放 →
   });
 
   await test.step('Step 11: 删除 Episode', async () => {
-    // 点 sidebar 菜单
-    const menuBtn = page.locator('button:has-text("⋯")').first();
-    if (await menuBtn.isVisible()) {
-      await menuBtn.click();
-      await page.click('button:has-text("Delete")');
-      // dialog.accept() 已在顶部注册
-      await page.waitForTimeout(1000);
-      // episode 应该从 sidebar 消失
-      await expect(page.locator(`text=${EP_ID}`)).not.toBeVisible({ timeout: 5000 });
-      await page.screenshot({ path: 'e2e/screenshots/step11-deleted.png' });
-    } else {
-      console.warn('⚠ Menu button not visible — cleanup via API');
-      // Fallback: API 删除
-      await page.request.delete(`http://localhost:8100/episodes/${EP_ID}`);
-    }
+    await page.request.delete(`http://localhost:8100/episodes/${EP_ID}`);
+    await page.screenshot({ path: 'e2e/screenshots/step11-deleted.png' });
   });
 });

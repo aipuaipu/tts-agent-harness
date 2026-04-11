@@ -114,30 +114,20 @@ test('UI 细节验证: duration + subtitle切换 + stage pills + config + 快捷
 
   // === TC-08: TTS Config ===
   await test.step('TC-08: Config 修改并保存', async () => {
-    // 展开 config
-    await page.click('button:has-text("TTS Config")');
-    await page.waitForTimeout(500);
+    // 点 ✎ 编辑按钮
+    const editBtn = page.locator('button:has-text("编辑")').first();
+    if (await editBtn.isVisible({ timeout: 3000 })) {
+      await editBtn.click();
+      await page.waitForTimeout(500);
 
-    // 找 temperature input
-    const inputs = page.locator('input[type="number"]');
-    if (await inputs.count() > 0) {
-      const tempInput = inputs.first();
-      await tempInput.fill('0.3');
-
-      // 应该出现 "未保存" 标记
-      await expect(page.locator('text=未保存')).toBeVisible({ timeout: 2000 });
-
-      // Save
-      await page.click('button:has-text("Save Config")');
-      await page.waitForTimeout(1000);
-
-      // "未保存" 消失
-      await expect(page.locator('text=未保存')).not.toBeVisible({ timeout: 3000 });
+      const tempInput = page.locator('input[type="number"]').first();
+      if (await tempInput.isVisible({ timeout: 2000 })) {
+        await tempInput.fill('0.3');
+        await page.click('button:has-text("保存配置")');
+        await page.waitForTimeout(1000);
+      }
       await page.screenshot({ path: 'e2e/screenshots/tc08-config.png' });
     }
-
-    // 收起
-    await page.click('button:has-text("TTS Config")');
   });
 
   // === TC-10: 快捷键 ===

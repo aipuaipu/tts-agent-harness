@@ -3,6 +3,14 @@
  * 这里不 import 任何 adapter / server-only 代码。
  */
 
+import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+/** Tailwind class merge utility (shadcn/ui standard). */
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
 /** Strip S2-Pro 控制标记,供字幕显示用。与 P5 脚本的行为一致。 */
 export function stripControlMarkers(text: string | null | undefined): string {
   return String(text ?? "")
