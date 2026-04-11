@@ -402,8 +402,12 @@ async def run_episode(
                 """Write stage_run record so frontend sees per-chunk progress."""
                 from server.core.repositories import StageRunRepo
                 async with _session_factory() as s:
-                    await StageRunRepo(s).upsert(
+                    sr_repo = StageRunRepo(s)
+                    existing = await sr_repo.get(cid, stage)
+                    attempt = (existing.attempt + 1) if existing and status == "running" else (existing.attempt if existing else 1)
+                    await sr_repo.upsert(
                         chunk_id=cid, stage=stage, status=status,
+                        attempt=attempt,
                         started_at=started, finished_at=datetime.now(timezone.utc) if status in ("ok", "failed") else None,
                         error=error,
                     )
