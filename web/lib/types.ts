@@ -162,3 +162,11 @@ export const STAGE_ORDER: readonly StageName[] = [
   "p6",
   "p6v",
 ];
+
+/** Chunk-level stages only (shown in per-chunk pipeline pill row) */
+export const CHUNK_STAGE_ORDER: readonly StageName[] = [
+  "p2",
+  "p2c",
+  "p2v",
+  "p5",
+];

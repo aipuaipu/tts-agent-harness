@@ -1,7 +1,7 @@
 "use client";
 
 import type { StageName, StageRun } from "@/lib/types";
-import { STAGE_ORDER, getStageRun } from "@/lib/types";
+import { STAGE_ORDER, CHUNK_STAGE_ORDER, getStageRun } from "@/lib/types";
 
 interface Props {
   stageRuns: StageRun[];
@@ -74,7 +74,7 @@ export function StagePipeline({
 
   return (
     <div className="inline-flex items-center">
-      {STAGE_ORDER.map((stage, idx) => {
+      {(compact ? CHUNK_STAGE_ORDER : STAGE_ORDER).map((stage, idx) => {
         const sr = getStageRun(stageRuns, stage);
         const color = stageColorClasses(sr);
         const hover = clickable ? "cursor-pointer hover:brightness-110" : "";
@@ -85,7 +85,8 @@ export function StagePipeline({
         const showAttemptBadge = (sr?.attempt ?? 0) > 1;
 
         const gate = isGate(stage);
-        const prevGate = idx > 0 && isGate(STAGE_ORDER[idx - 1]);
+        const stages = compact ? CHUNK_STAGE_ORDER : STAGE_ORDER;
+        const prevGate = idx > 0 && isGate(stages[idx - 1]);
         const connectorWidth = gate || prevGate ? "w-1" : "w-2";
 
         return (
