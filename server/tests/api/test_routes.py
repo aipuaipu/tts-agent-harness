@@ -551,3 +551,58 @@ class TestEpisodeLogs:
     async def test_get_episode_logs_not_found(self, client: AsyncClient):
         resp = await client.get("/episodes/nope/logs")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Error handling tests
+# ---------------------------------------------------------------------------
+
+
+class TestErrorHandling:
+    """Verify that errors return structured JSON, not bare 500."""
+
+    async def test_legacy_status_compat(self, seeded_client: AsyncClient):
+        """DB has 'transcribed' status → API maps to 'verified', no 500."""
+        global _maker
+        async with _maker() as session:
+            chunk_repo = ChunkRepo(session)
+            # Directly set legacy status in DB
+            from sqlalchemy import text
+            await session.execute(
+                text("UPDATE chunks SET status = 'transcribed' WHERE id = 'ep-test:shot01:0'")
+            )
+            await session.commit()
+
+        resp = await seeded_client.get("/episodes/ep-test")
+        assert resp.status_code == 200
+        data = resp.json()
+        chunk = next(c for c in data["chunks"] if c["id"] == "ep-test:shot01:0")
+        assert chunk["status"] == "verified"  # mapped, not 'transcribed'
+
+    async def test_not_found_returns_json(self, client: AsyncClient):
+        """DomainError(not_found) → 404 with structured JSON."""
+        resp = await client.get("/episodes/nonexistent-episode-xyz")
+        assert resp.status_code == 404
+        data = resp.json()
+        assert data["error"] == "not_found"
+        assert "detail" in data
+
+    async def test_global_exception_handler(self, client: AsyncClient):
+        """Unhandled exceptions → 500 with JSON body, not bare text."""
+        # Trigger by requesting an episode with broken DB state
+        # We use a mock that raises an unexpected exception
+        from server.api.main import app
+        from server.api.deps import get_session
+
+        async def _broken_session():
+            raise RuntimeError("simulated DB crash")
+
+        app.dependency_overrides[get_session] = _broken_session
+        try:
+            resp = await client.get("/episodes/anything")
+            assert resp.status_code == 500
+            data = resp.json()
+            assert data["error"] == "internal"
+            assert "RuntimeError" in data["detail"]
+        finally:
+            app.dependency_overrides.pop(get_session, None)
