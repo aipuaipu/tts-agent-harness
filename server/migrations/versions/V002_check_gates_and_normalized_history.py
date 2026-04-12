@@ -35,6 +35,8 @@ def upgrade() -> None:
             nullable=False,
         ),
     )
+    # Migrate old "transcribed" status to "verified"
+    op.execute("UPDATE chunks SET status = 'verified' WHERE status = 'transcribed'")
 
 
 def downgrade() -> None:
