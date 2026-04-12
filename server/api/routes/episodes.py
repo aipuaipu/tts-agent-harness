@@ -229,7 +229,10 @@ async def get_episode(
     for c in chunks:
         takes = await take_repo.list_by_chunk(c.id)
         stage_runs = await sr_repo.list_by_chunk(c.id)
-        # Build from dict to avoid lazy-load issues on ORM relationships
+        # Build from dict to avoid lazy-load issues on ORM relationships.
+        # Defensive: map legacy status values to prevent Pydantic validation errors.
+        _STATUS_COMPAT = {"transcribed": "verified"}
+        chunk_status = _STATUS_COMPAT.get(c.status, c.status)
         chunk_dict = {
             "id": c.id,
             "episode_id": c.episode_id,
@@ -238,7 +241,7 @@ async def get_episode(
             "text": c.text,
             "text_normalized": c.text_normalized,
             "subtitle_text": c.subtitle_text,
-            "status": c.status,
+            "status": chunk_status,
             "selected_take_id": c.selected_take_id,
             "boundary_hash": c.boundary_hash,
             "char_count": c.char_count,

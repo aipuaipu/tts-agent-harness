@@ -71,7 +71,27 @@ async def unhandled_error_handler(_request: Request, exc: Exception) -> JSONResp
 
 
 def install_error_handlers(app: FastAPI) -> None:
-    """Register exception handlers on *app*. Order matters — most specific first."""
+    """Register exception handlers and middleware on *app*."""
     app.add_exception_handler(DomainError, domain_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(ValidationError, validation_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(Exception, unhandled_error_handler)  # type: ignore[arg-type]
+
+    # Middleware catch-all: FastAPI's response serialization errors bypass
+    # exception handlers (they happen after the route returns). This
+    # middleware wraps every request so even those errors get a JSON body.
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request as StarletteRequest
+    from starlette.responses import Response
+
+    class CatchAllMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: StarletteRequest, call_next) -> Response:  # type: ignore[override]
+            try:
+                return await call_next(request)
+            except Exception as exc:
+                log.exception("Middleware caught unhandled error on %s %s", request.method, request.url.path)
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "internal", "detail": f"{type(exc).__name__}: {exc}"},
+                )
+
+    app.add_middleware(CatchAllMiddleware)
