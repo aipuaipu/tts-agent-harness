@@ -2,28 +2,30 @@
 
 Supports multiple run modes (D-03 product design):
 - "chunk_only": Only P1 (split script into chunks)
-- "synthesize": P2→P2v→P5→P6, skipping chunks with selected_take (D-05)
+- "synthesize": P2→P2c→P2v repair loop→P5→P6, skipping chunks with selected_take (D-05)
 - "retry_failed": Only re-run failed chunks from their failed stage
 - "regenerate": Clear all, re-run P1→P2→P2v→P5→P6
 
 Status transitions:
   episode: empty → ready (P1) → running → done (P6)
-  chunk: pending → synth_done (P2) → verified (P2v)
+  chunk: pending → synth_done (P2) → verified (P2v) | needs_review
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 from prefect import flow
 
-from server.core.domain import P1Result, P6Result
+from server.core.domain import P1Result, P2vResult, P6Result, RepairConfig
+from server.flows.repair import decide_repair
 from server.flows.tasks.p1_chunk import P1Context, p1_chunk
 from server.flows.tasks.p1c_check import p1c_check
-from server.flows.tasks.p2_synth import p2_synth
-from server.flows.tasks.p2c_check import p2c_check
-from server.flows.tasks.p2v_verify import p2v_verify
+from server.flows.tasks.p2_synth import p2_synth, run_p2_synth
+from server.flows.tasks.p2c_check import p2c_check, run_p2c_check
+from server.flows.tasks.p2v_verify import p2v_verify, run_p2v_verify
 from server.flows.tasks.p3_transcribe import p3_transcribe  # kept for backward compat
 from server.flows.tasks.p5_subtitles import p5_subtitles
 from server.flows.tasks.p6_concat import p6_concat
@@ -80,6 +82,143 @@ async def _run_chunk_only(episode_id: str) -> dict[str, Any]:
     return {"mode": "chunk_only", "chunk_count": len(p1_result.chunks)}
 
 
+# ---------------------------------------------------------------------------
+# Per-chunk synth loop (P2 → P2c → P2v, with L0/L1 repair)
+# ---------------------------------------------------------------------------
+
+
+async def _synth_one_chunk(
+    episode_id: str,
+    chunk_id: str,
+    base_params: dict,
+    language: str,
+    repair_config: RepairConfig,
+    *,
+    _write_event: Any | None = None,
+    _set_chunk_status: Any | None = None,
+) -> dict[str, Any]:
+    """Run the P2→P2c→P2v repair loop for a single chunk.
+
+    Returns a summary dict with keys: chunk_id, verdict, attempts, level.
+    The ``_write_event`` and ``_set_chunk_status`` callbacks are used by
+    tests to intercept side-effects; in production they default to the
+    real implementations.
+    """
+    # Lazy-import write_event + ChunkRepo to avoid circular imports at
+    # module level and to let tests inject mocks.
+    if _write_event is None:
+        from server.flows.worker_bootstrap import _session_factory
+        from server.core.events import write_event as _real_write_event
+        from server.core.repositories import ChunkRepo
+
+        async def _write_event(ep_id, c_id, kind, payload):
+            async with _session_factory() as session:
+                await _real_write_event(
+                    session,
+                    episode_id=ep_id,
+                    chunk_id=c_id,
+                    kind=kind,
+                    payload=payload,
+                )
+                await session.commit()
+
+    if _set_chunk_status is None:
+        from server.flows.worker_bootstrap import _session_factory
+        from server.core.repositories import ChunkRepo
+
+        async def _set_chunk_status(c_id, status):
+            async with _session_factory() as session:
+                await ChunkRepo(session).set_status(c_id, status)
+                await session.commit()
+
+    attempt = 0
+    level = 0
+    current_params = dict(base_params)
+
+    while True:
+        attempt += 1
+
+        # P2: synthesize
+        try:
+            p2_result = await run_p2_synth(chunk_id, params=current_params)
+        except Exception:
+            log.exception("P2 synth failed for chunk %s (attempt %d)", chunk_id, attempt)
+            if attempt >= repair_config.max_total_attempts:
+                await _set_chunk_status(chunk_id, "needs_review")
+                await _write_event(episode_id, chunk_id, "needs_review", {
+                    "total_attempts": attempt, "reason": "P2 synth exception",
+                })
+                return {"chunk_id": chunk_id, "verdict": "needs_review", "attempts": attempt, "level": level}
+            continue
+
+        # P2c: WAV format check
+        try:
+            p2c_result = await run_p2c_check(chunk_id)
+        except Exception:
+            log.exception("P2c check failed for chunk %s (attempt %d)", chunk_id, attempt)
+            if attempt >= repair_config.max_total_attempts:
+                await _set_chunk_status(chunk_id, "needs_review")
+                await _write_event(episode_id, chunk_id, "needs_review", {
+                    "total_attempts": attempt, "reason": "P2c check exception",
+                })
+                return {"chunk_id": chunk_id, "verdict": "needs_review", "attempts": attempt, "level": level}
+            continue
+
+        if p2c_result.get("status") == "failed":
+            log.warning("P2c failed for chunk %s: %s", chunk_id, p2c_result.get("errors"))
+            # Format error — retry P2 without counting as P2v attempt.
+            if attempt >= repair_config.max_total_attempts:
+                await _set_chunk_status(chunk_id, "needs_review")
+                await _write_event(episode_id, chunk_id, "needs_review", {
+                    "total_attempts": attempt, "reason": "P2c format check failed",
+                })
+                return {"chunk_id": chunk_id, "verdict": "needs_review", "attempts": attempt, "level": level}
+            continue
+
+        # P2v: ASR transcribe + quality verify
+        try:
+            p2v_result: P2vResult = await run_p2v_verify(chunk_id, language=language)
+        except Exception:
+            log.exception("P2v verify failed for chunk %s (attempt %d)", chunk_id, attempt)
+            if attempt >= repair_config.max_total_attempts:
+                await _set_chunk_status(chunk_id, "needs_review")
+                await _write_event(episode_id, chunk_id, "needs_review", {
+                    "total_attempts": attempt, "reason": "P2v verify exception",
+                })
+                return {"chunk_id": chunk_id, "verdict": "needs_review", "attempts": attempt, "level": level}
+            continue
+
+        if p2v_result.verdict == "pass":
+            log.info("chunk %s verified on attempt %d (level %d)", chunk_id, attempt, level)
+            return {"chunk_id": chunk_id, "verdict": "pass", "attempts": attempt, "level": level}
+
+        # P2v failed — decide repair strategy.
+        repair = decide_repair(attempt, level, p2v_result, repair_config, current_params)
+
+        await _write_event(episode_id, chunk_id, "repair_decided", {
+            "attempt": attempt,
+            "level": level,
+            "action": repair.action,
+            "reason": repair.reason,
+        })
+
+        if repair.action == "stop":
+            await _set_chunk_status(chunk_id, "needs_review")
+            await _write_event(episode_id, chunk_id, "needs_review", {
+                "total_attempts": attempt,
+            })
+            log.warning(
+                "chunk %s → needs_review after %d attempts: %s",
+                chunk_id, attempt, repair.reason,
+            )
+            return {"chunk_id": chunk_id, "verdict": "needs_review", "attempts": attempt, "level": level}
+
+        # Apply repair: update level + params.
+        level = repair.level
+        if repair.params_override:
+            current_params = {**current_params, **repair.params_override}
+
+
 async def _run_synthesize(
     episode_id: str,
     chunk_ids: list[str] | None,
@@ -87,7 +226,7 @@ async def _run_synthesize(
     padding_ms: int,
     shot_gap_ms: int,
 ) -> dict[str, Any]:
-    """Mode: synthesize — P2→P3→P5→P6, skipping chunks with selected_take (D-05)."""
+    """Mode: synthesize — P2→P2c→P2v repair loop→P5→P6, with D-05 skip."""
     from server.flows.worker_bootstrap import bootstrap, _session_factory
 
     if _session_factory is None:
@@ -99,7 +238,11 @@ async def _run_synthesize(
         ep_repo = EpisodeRepo(session)
         all_chunks = await chunk_repo.list_by_episode(episode_id)
         ep = await ep_repo.get(episode_id)
-        tts_config = (ep.config if ep else None) or {}
+        ep_config = (ep.config if ep else None) or {}
+
+    # Parse repair config from episode.config.repair (or defaults).
+    repair_config = RepairConfig(**(ep_config.get("repair", {})))
+    tts_config = {k: v for k, v in ep_config.items() if k != "repair"}
 
     # Filter to requested chunk_ids if provided
     if chunk_ids is not None:
@@ -108,45 +251,82 @@ async def _run_synthesize(
         target_chunks = list(all_chunks)
 
     # D-05: Skip P2 for chunks that already have a selected_take
-    need_p2 = [c.id for c in target_chunks if c.selected_take_id is None]
-    skip_p2 = [c.id for c in target_chunks if c.selected_take_id is not None]
+    need_p2 = [c for c in target_chunks if c.selected_take_id is None]
+    skip_p2 = [c for c in target_chunks if c.selected_take_id is not None]
     all_ids = [c.id for c in target_chunks]
 
     if skip_p2:
         log.info("D-05: skipping P2 for %d chunks (have selected_take)", len(skip_p2))
 
     # P1c: input validation gate (only for chunks going through P2)
-    if need_p2:
-        p1c_futures = p1c_check.map(need_p2)
+    need_p2_ids = [c.id for c in need_p2]
+    if need_p2_ids:
+        p1c_futures = p1c_check.map(need_p2_ids)
         [await f.result() for f in p1c_futures]
-        log.info("P1c complete: %d chunks validated", len(need_p2))
+        log.info("P1c complete: %d chunks validated", len(need_p2_ids))
 
-    # P2: only for chunks without take; pass episode.config as TTS params
-    if need_p2:
-        p2_params = tts_config if tts_config else None
-        p2_futures = p2_synth.map(need_p2, [p2_params] * len(need_p2))
-        [await f.result() for f in p2_futures]
-        log.info("P2 complete: %d synthesized, %d skipped, config=%s", len(need_p2), len(skip_p2), bool(tts_config))
+    # Per-chunk synth loop — chunks run in parallel, each with its own
+    # repair loop (L0/L1 auto-retry).
+    if need_p2_ids:
+        p2_params = tts_config if tts_config else {}
+        loop_tasks = [
+            _synth_one_chunk(
+                episode_id=episode_id,
+                chunk_id=cid,
+                base_params=p2_params,
+                language=language,
+                repair_config=repair_config,
+            )
+            for cid in need_p2_ids
+        ]
+        loop_results = await asyncio.gather(*loop_tasks)
+        verified_count = sum(1 for r in loop_results if r["verdict"] == "pass")
+        needs_review_count = sum(1 for r in loop_results if r["verdict"] == "needs_review")
+        log.info(
+            "Synth loop complete: %d verified, %d needs_review, %d skipped",
+            verified_count, needs_review_count, len(skip_p2),
+        )
     else:
         log.info("P2 skipped entirely (all chunks have takes)")
+        loop_results = []
+        verified_count = 0
+        needs_review_count = 0
 
-    # P2c: WAV format validation gate (for all chunks with audio)
-    p2c_ids = [c_id for c_id in all_ids]
-    p2c_futures = p2c_check.map(p2c_ids)
-    [await f.result() for f in p2c_futures]
-    log.info("P2c complete: %d WAVs validated", len(p2c_ids))
+    # For chunks that were skipped (already had takes), also run P2v if not
+    # yet verified (they may have been synthesized in a prior run).
+    skip_ids = [c.id for c in skip_p2]
+    if skip_ids:
+        # Re-read chunk statuses to see which skipped chunks need P2v.
+        async with _session_factory() as session:
+            chunk_repo = ChunkRepo(session)
+            skipped_chunks = [await chunk_repo.get(cid) for cid in skip_ids]
+        need_verify = [c.id for c in skipped_chunks if c and c.status == "synth_done"]
+        if need_verify:
+            p2v_futures = p2v_verify.map(need_verify, [language] * len(need_verify))
+            [await f.result() for f in p2v_futures]
+            log.info("P2v (skipped chunks): %d verified", len(need_verify))
 
-    # P2v: ASR transcribe + quality verify (replaces P3 + check3)
-    p2v_futures = p2v_verify.map(all_ids, [language] * len(all_ids))
-    p2v_results = [await f.result() for f in p2v_futures]
-    passed = sum(1 for r in p2v_results if r.verdict == "pass")
-    failed = sum(1 for r in p2v_results if r.verdict == "fail")
-    log.info("P2v complete: %d passed, %d failed out of %d", passed, failed, len(all_ids))
+    # Determine which chunks are verified and eligible for P5/P6.
+    async with _session_factory() as session:
+        chunk_repo = ChunkRepo(session)
+        refreshed = await chunk_repo.list_by_episode(episode_id)
+    verified_ids = [c.id for c in refreshed if c.status == "verified" and c.id in set(all_ids)]
 
-    # P5: subtitles for all target chunks
-    p5_futures = p5_subtitles.map(all_ids)
+    if not verified_ids:
+        log.warning("No verified chunks — skipping P5/P6")
+        return {
+            "mode": "synthesize",
+            "synthesized": len(need_p2_ids),
+            "skipped_p2": len(skip_p2),
+            "verified": 0,
+            "needs_review": needs_review_count,
+            "total": len(all_ids),
+        }
+
+    # P5: subtitles for verified chunks only.
+    p5_futures = p5_subtitles.map(verified_ids)
     [await f.result() for f in p5_futures]
-    log.info("P5 complete: %d subtitles", len(all_ids))
+    log.info("P5 complete: %d subtitles", len(verified_ids))
 
     # P6: concat (always runs on full episode, not just targets)
     p6_result: P6Result = await p6_concat(episode_id, padding_ms=padding_ms, shot_gap_ms=shot_gap_ms)
@@ -162,8 +342,10 @@ async def _run_synthesize(
 
     return {
         "mode": "synthesize",
-        "synthesized": len(need_p2),
+        "synthesized": len(need_p2_ids),
         "skipped_p2": len(skip_p2),
+        "verified": len(verified_ids),
+        "needs_review": needs_review_count,
         "total": len(all_ids),
     }
 
@@ -174,7 +356,7 @@ async def _run_retry_failed(
     padding_ms: int,
     shot_gap_ms: int,
 ) -> dict[str, Any]:
-    """Mode: retry_failed — Only re-run chunks with status='failed'."""
+    """Mode: retry_failed — Only re-run chunks with status='failed' or 'needs_review'."""
     from server.flows.worker_bootstrap import bootstrap, _session_factory
 
     if _session_factory is None:
@@ -186,33 +368,46 @@ async def _run_retry_failed(
         all_chunks = await chunk_repo.list_by_episode(episode_id)
         ep_repo = EpisodeRepo(session)
         ep = await ep_repo.get(episode_id)
-        tts_config = (ep.config if ep else None) or {}
+        ep_config = (ep.config if ep else None) or {}
 
-    failed = [c for c in all_chunks if c.status == "failed"]
-    if not failed:
-        log.info("No failed chunks to retry")
+    repair_config = RepairConfig(**(ep_config.get("repair", {})))
+    tts_config = {k: v for k, v in ep_config.items() if k != "repair"}
+
+    retry_targets = [c for c in all_chunks if c.status in ("failed", "needs_review")]
+    if not retry_targets:
+        log.info("No failed/needs_review chunks to retry")
         return {"mode": "retry_failed", "retried": 0}
 
-    failed_ids = [c.id for c in failed]
-    log.info("Retrying %d failed chunks", len(failed_ids))
+    retry_ids = [c.id for c in retry_targets]
+    log.info("Retrying %d failed/needs_review chunks", len(retry_ids))
 
-    # P1c: input validation for failed chunks
-    p1c_futures = p1c_check.map(failed_ids)
+    # P1c: input validation for retry chunks
+    p1c_futures = p1c_check.map(retry_ids)
     [await f.result() for f in p1c_futures]
 
-    # Re-run P2→P2c→P2v→P5 for failed chunks, using episode.config
-    p2_params = tts_config if tts_config else None
-    p2_futures = p2_synth.map(failed_ids, [p2_params] * len(failed_ids))
-    [await f.result() for f in p2_futures]
+    # Per-chunk synth loop with repair.
+    p2_params = tts_config if tts_config else {}
+    loop_tasks = [
+        _synth_one_chunk(
+            episode_id=episode_id,
+            chunk_id=cid,
+            base_params=p2_params,
+            language=language,
+            repair_config=repair_config,
+        )
+        for cid in retry_ids
+    ]
+    await asyncio.gather(*loop_tasks)
 
-    p2c_futures = p2c_check.map(failed_ids)
-    [await f.result() for f in p2c_futures]
+    # P5 for verified chunks.
+    async with _session_factory() as session:
+        chunk_repo = ChunkRepo(session)
+        refreshed = await chunk_repo.list_by_episode(episode_id)
+    verified_ids = [c.id for c in refreshed if c.status == "verified"]
 
-    p2v_futures = p2v_verify.map(failed_ids, [language] * len(failed_ids))
-    [await f.result() for f in p2v_futures]
-
-    p5_futures = p5_subtitles.map(failed_ids)
-    [await f.result() for f in p5_futures]
+    if verified_ids:
+        p5_futures = p5_subtitles.map(verified_ids)
+        [await f.result() for f in p5_futures]
 
     # P6: re-concat full episode
     p6_result = await p6_concat(episode_id, padding_ms=padding_ms, shot_gap_ms=shot_gap_ms)
@@ -225,7 +420,7 @@ async def _run_retry_failed(
         total_duration_s=p6_result.total_duration_s,
     )
 
-    return {"mode": "retry_failed", "retried": len(failed_ids)}
+    return {"mode": "retry_failed", "retried": len(retry_ids)}
 
 
 async def _run_regenerate(
@@ -234,18 +429,21 @@ async def _run_regenerate(
     padding_ms: int,
     shot_gap_ms: int,
 ) -> dict[str, Any]:
-    """Mode: regenerate — Clear everything, re-run P1→P2→P3→P5→P6."""
+    """Mode: regenerate — Clear everything, re-run P1→P2→P2v→P5→P6."""
     from server.flows.worker_bootstrap import get_p1_context, bootstrap, _session_factory
 
     if _session_factory is None:
         bootstrap()
 
     # Read episode config for P2 params
-    from server.core.repositories import EpisodeRepo
+    from server.core.repositories import EpisodeRepo, ChunkRepo
     async with _session_factory() as session:  # type: ignore[misc]
         ep_repo = EpisodeRepo(session)
         ep = await ep_repo.get(episode_id)
-        tts_config = (ep.config if ep else None) or {}
+        ep_config = (ep.config if ep else None) or {}
+
+    repair_config = RepairConfig(**(ep_config.get("repair", {})))
+    tts_config = {k: v for k, v in ep_config.items() if k != "repair"}
 
     # P1 clears chunks (DELETE + bulk_insert)
     ctx = get_p1_context()
@@ -257,19 +455,29 @@ async def _run_regenerate(
     p1c_futures = p1c_check.map(chunk_ids)
     [await f.result() for f in p1c_futures]
 
-    p2_params = tts_config if tts_config else None
-    p2_futures = p2_synth.map(chunk_ids, [p2_params] * len(chunk_ids))
-    [await f.result() for f in p2_futures]
+    # Per-chunk synth loop with repair.
+    p2_params = tts_config if tts_config else {}
+    loop_tasks = [
+        _synth_one_chunk(
+            episode_id=episode_id,
+            chunk_id=cid,
+            base_params=p2_params,
+            language=language,
+            repair_config=repair_config,
+        )
+        for cid in chunk_ids
+    ]
+    await asyncio.gather(*loop_tasks)
 
-    # P2c: WAV validation
-    p2c_futures = p2c_check.map(chunk_ids)
-    [await f.result() for f in p2c_futures]
+    # P5 for verified chunks only.
+    async with _session_factory() as session:
+        chunk_repo = ChunkRepo(session)
+        refreshed = await chunk_repo.list_by_episode(episode_id)
+    verified_ids = [c.id for c in refreshed if c.status == "verified"]
 
-    p2v_futures = p2v_verify.map(chunk_ids, [language] * len(chunk_ids))
-    [await f.result() for f in p2v_futures]
-
-    p5_futures = p5_subtitles.map(chunk_ids)
-    [await f.result() for f in p5_futures]
+    if verified_ids:
+        p5_futures = p5_subtitles.map(verified_ids)
+        [await f.result() for f in p5_futures]
 
     p6_result = await p6_concat(episode_id, padding_ms=padding_ms, shot_gap_ms=shot_gap_ms)
 
@@ -283,8 +491,9 @@ async def _run_regenerate(
     return {
         "mode": "regenerate",
         "chunk_count": len(chunk_ids),
+        "verified": len(verified_ids),
         "wav_uri": p6_result.wav_uri,
     }
 
 
-__all__ = ["run_episode_flow"]
+__all__ = ["run_episode_flow", "_synth_one_chunk"]
