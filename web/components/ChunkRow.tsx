@@ -81,6 +81,8 @@ export function ChunkRow({
       });
     } else {
       el.pause();
+      el.currentTime = 0;
+      setCurrentTime(0);
     }
   }, [isPlaying]);
 
@@ -118,12 +120,25 @@ export function ChunkRow({
   const handleSeek = (timeS: number) => {
     if (!canPlay) return;
     const el = audioRef.current;
+    if (!el) return;
     const target = Math.max(0, Math.min(durationS, timeS));
-    if (el) {
+
+    const doSeek = () => {
       el.currentTime = target;
       setCurrentTime(target);
+    };
+
+    if (!isPlaying) {
+      // Start playing this chunk first, then seek once audio is ready
+      onPlay();
+      if (el.readyState >= 1) {
+        doSeek();
+      } else {
+        el.addEventListener("loadedmetadata", doSeek, { once: true });
+      }
+    } else {
+      doSeek();
     }
-    if (!isPlaying) onPlay();
   };
 
   const rowBg = isPlaying
