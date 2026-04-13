@@ -1,7 +1,7 @@
 "use client";
 
 import { useTheme } from "@/components/Providers";
-import { Sun, Moon } from "lucide-react";
+import { Sun, Moon, KeyRound } from "lucide-react";
 import type { Episode, EpisodeStatus } from "@/lib/types";
 import { getApiUrl } from "@/lib/api-client";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -11,6 +11,7 @@ interface Props {
   running: boolean;
   onRun: (mode: string) => void;
   onViewScript?: () => void;
+  onApiKeyClick?: () => void;
   failedCount?: number;
 }
 
@@ -25,7 +26,7 @@ const STATUS_BADGE: Record<
   empty: { bg: "bg-neutral-50 dark:bg-neutral-800", fg: "text-neutral-500 dark:text-neutral-400", br: "border-neutral-200 dark:border-neutral-700", label: "empty" },
 };
 
-export function EpisodeHeader({ episode, running, onRun, onViewScript, failedCount = 0 }: Props) {
+export function EpisodeHeader({ episode, running, onRun, onViewScript, onApiKeyClick, failedCount = 0 }: Props) {
   const badge = STATUS_BADGE[episode.status] ?? STATUS_BADGE.ready;
   const { resolvedTheme, setTheme } = useTheme();
 
@@ -62,6 +63,14 @@ export function EpisodeHeader({ episode, running, onRun, onViewScript, failedCou
         <span className="ml-auto text-[11px] text-neutral-400 dark:text-neutral-500 font-mono">
           {episode.chunks.length} chunks · {totalDurationS.toFixed(1)}s
         </span>
+        <button
+          type="button"
+          onClick={onApiKeyClick}
+          className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 dark:text-neutral-400"
+          title="API Key 设置"
+        >
+          <KeyRound size={14} />
+        </button>
         <button
           type="button"
           onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}

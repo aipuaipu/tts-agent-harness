@@ -20,6 +20,7 @@ import { EpisodeStageBar } from "@/components/EpisodeStageBar";
 import { TtsConfigBar } from "@/components/TtsConfigBar";
 import { StageLogDrawer } from "@/components/StageLogDrawer";
 import { ScriptPreviewDialog } from "@/components/ScriptPreviewDialog";
+import { ApiKeyDialog } from "@/components/ApiKeyDialog";
 
 export default function Page() {
   // --- Store state ---
@@ -101,6 +102,7 @@ export default function Page() {
   // --- NewEpisode dialog state (local — only used here) ---
   const [newEpOpen, setNewEpOpen] = useState(false);
   const [scriptPreviewOpen, setScriptPreviewOpen] = useState(false);
+  const [apiKeyOpen, setApiKeyOpen] = useState(false);
   const [synthesizingCid, setSynthesizingCid] = useState<string | null>(null);
 
   return (
@@ -143,6 +145,7 @@ export default function Page() {
                 running={running}
                 onRun={async (mode) => { await store.runEpisode(mode); await mutateDetail(); await mutateList(); }}
                 onViewScript={() => setScriptPreviewOpen(true)}
+                onApiKeyClick={() => setApiKeyOpen(true)}
                 failedCount={failedCount}
               />
               <TtsConfigBar
@@ -239,6 +242,7 @@ export default function Page() {
         onCreate={async (id, file) => { await store.createEpisode(id, file); await mutateList(); store.selectEpisode(id); setNewEpOpen(false); }}
       />
       <HelpDialog open={store.helpOpen} onClose={() => store.setHelpOpen(false)} />
+      <ApiKeyDialog open={apiKeyOpen} onClose={() => setApiKeyOpen(false)} />
       {selectedId && (
         <ScriptPreviewDialog
           episodeId={selectedId}
