@@ -194,9 +194,21 @@ async def run_p2_synth(
     async with _session_scope(session_factory) as session:
         chunk = await ChunkRepo(session).get(chunk_id)
         if chunk is None:
+            await _emit_stage_failed(
+                session_factory,
+                episode_id="unknown",
+                chunk_id=chunk_id,
+                error=f"chunk not found: {chunk_id}",
+            )
             raise DomainError("not_found", f"chunk not found: {chunk_id}")
         text = (chunk.text_normalized or "").strip()
         if not text:
+            await _emit_stage_failed(
+                session_factory,
+                episode_id=chunk.episode_id,
+                chunk_id=chunk_id,
+                error=f"chunk {chunk_id} has empty text_normalized",
+            )
             raise DomainError(
                 "invalid_input", f"chunk {chunk_id} has empty text_normalized"
             )

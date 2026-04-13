@@ -158,6 +158,12 @@ async def run_p2c_check(chunk_id: str) -> dict[str, Any]:
     async with _session_scope(session_factory) as session:
         chunk = await ChunkRepo(session).get(chunk_id)
         if chunk is None:
+            await _emit_stage_failed(
+                session_factory,
+                episode_id="unknown",
+                chunk_id=chunk_id,
+                error=f"chunk not found: {chunk_id}",
+            )
             raise DomainError("not_found", f"chunk not found: {chunk_id}")
 
         episode_id = chunk.episode_id
@@ -165,10 +171,22 @@ async def run_p2c_check(chunk_id: str) -> dict[str, Any]:
         take_id = chunk.selected_take_id
 
         if not take_id:
+            await _emit_stage_failed(
+                session_factory,
+                episode_id=episode_id,
+                chunk_id=chunk_id,
+                error=f"chunk {chunk_id} has no selected take",
+            )
             raise DomainError("invalid_state", f"chunk {chunk_id} has no selected take")
 
         take = await TakeRepo(session).select(take_id)
         if take is None:
+            await _emit_stage_failed(
+                session_factory,
+                episode_id=episode_id,
+                chunk_id=chunk_id,
+                error=f"take not found: {take_id}",
+            )
             raise DomainError("not_found", f"take not found: {take_id}")
         audio_uri = take.audio_uri
         # Strip s3://bucket/ prefix to get the MinIO object key
@@ -255,6 +273,28 @@ async def run_p2c_check(chunk_id: str) -> dict[str, Any]:
         "errors": errors,
         "warnings": warnings,
     }
+
+
+async def _emit_stage_failed(
+    session_factory: _SessionFactory,
+    *,
+    episode_id: str,
+    chunk_id: str,
+    error: str,
+) -> None:
+    """Best-effort stage_failed event write — never masks the real error."""
+    try:
+        async with _session_scope(session_factory) as session:
+            await write_event(
+                session,
+                episode_id=episode_id,
+                chunk_id=chunk_id,
+                kind="stage_failed",
+                payload={"stage": "p2c", "error": error},
+            )
+            await session.commit()
+    except Exception:  # pragma: no cover
+        log.exception("failed to emit stage_failed event for chunk %s", chunk_id)
 
 
 # ---------------------------------------------------------------------------

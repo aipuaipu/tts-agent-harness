@@ -118,20 +118,44 @@ async def run_p5_subtitles(chunk_id: str) -> P5Result:
     async with _session_scope(session_factory) as session:
         chunk = await ChunkRepo(session).get(chunk_id)
         if chunk is None:
+            await _emit_stage_failed(
+                session_factory,
+                episode_id="unknown",
+                chunk_id=chunk_id,
+                error=f"chunk not found: {chunk_id}",
+            )
             raise DomainError("not_found", f"chunk not found: {chunk_id}")
         if not chunk.selected_take_id:
+            await _emit_stage_failed(
+                session_factory,
+                episode_id=chunk.episode_id,
+                chunk_id=chunk_id,
+                error=f"chunk {chunk_id} has no selected_take_id",
+            )
             raise DomainError(
                 "invalid_state",
                 f"chunk {chunk_id} has no selected_take_id",
             )
         take = await TakeRepo(session).select(chunk.selected_take_id)
         if take is None:
+            await _emit_stage_failed(
+                session_factory,
+                episode_id=chunk.episode_id,
+                chunk_id=chunk_id,
+                error=f"selected take {chunk.selected_take_id} not found for chunk {chunk_id}",
+            )
             raise DomainError(
                 "invalid_state",
                 f"selected take {chunk.selected_take_id} not found for chunk {chunk_id}",
             )
         total_duration = float(take.duration_s or 0.0)
         if total_duration <= 0:
+            await _emit_stage_failed(
+                session_factory,
+                episode_id=chunk.episode_id,
+                chunk_id=chunk_id,
+                error=f"take {take.id} has non-positive duration {total_duration}",
+            )
             raise DomainError(
                 "invalid_state",
                 f"take {take.id} has non-positive duration {total_duration}",

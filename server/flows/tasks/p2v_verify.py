@@ -184,14 +184,32 @@ async def run_p2v_verify(
     async with _session_scope(session_factory) as session:
         chunk = await ChunkRepo(session).get(chunk_id)
         if chunk is None:
+            await _emit_stage_failed(
+                session_factory,
+                episode_id="unknown",
+                chunk_id=chunk_id,
+                error=f"chunk not found: {chunk_id}",
+            )
             raise DomainError("not_found", f"chunk not found: {chunk_id}")
         if not chunk.selected_take_id:
+            await _emit_stage_failed(
+                session_factory,
+                episode_id=chunk.episode_id,
+                chunk_id=chunk_id,
+                error=f"chunk {chunk_id} has no selected_take_id",
+            )
             raise DomainError(
                 "invalid_state",
                 f"chunk {chunk_id} has no selected_take_id",
             )
         take = await TakeRepo(session).select(chunk.selected_take_id)
         if take is None:
+            await _emit_stage_failed(
+                session_factory,
+                episode_id=chunk.episode_id,
+                chunk_id=chunk_id,
+                error=f"selected take {chunk.selected_take_id} not found for chunk {chunk_id}",
+            )
             raise DomainError(
                 "invalid_state",
                 f"selected take {chunk.selected_take_id} not found for chunk {chunk_id}",
@@ -221,24 +239,18 @@ async def run_p2v_verify(
     try:
         wav_bytes = await storage.download_bytes(wav_key)
     except Exception as exc:
-        await _emit_verify_failed(
-            session_factory,
-            episode_id=episode_id,
-            chunk_id=chunk_id,
-            error=f"take WAV download failed: {type(exc).__name__}: {exc}",
-        )
+        _err = f"take WAV download failed: {type(exc).__name__}: {exc}"
+        await _emit_verify_failed(session_factory, episode_id=episode_id, chunk_id=chunk_id, error=_err)
+        await _emit_stage_failed(session_factory, episode_id=episode_id, chunk_id=chunk_id, error=_err)
         raise DomainError(
             "not_found",
             f"take WAV missing for chunk {chunk_id}: {wav_key}",
         ) from exc
 
     if not wav_bytes:
-        await _emit_verify_failed(
-            session_factory,
-            episode_id=episode_id,
-            chunk_id=chunk_id,
-            error="take WAV is zero bytes",
-        )
+        _err = "take WAV is zero bytes"
+        await _emit_verify_failed(session_factory, episode_id=episode_id, chunk_id=chunk_id, error=_err)
+        await _emit_stage_failed(session_factory, episode_id=episode_id, chunk_id=chunk_id, error=_err)
         raise DomainError("invalid_state", f"take WAV is empty for chunk {chunk_id}")
 
     # 4. ASR transcription: Groq Whisper (if configured) or local WhisperX.
@@ -253,12 +265,9 @@ async def run_p2v_verify(
         try:
             transcript_data = await groq_client.transcribe(wav_bytes, language)
         except Exception as exc:
-            await _emit_verify_failed(
-                session_factory,
-                episode_id=episode_id,
-                chunk_id=chunk_id,
-                error=f"groq asr call failed: {type(exc).__name__}: {exc}",
-            )
+            _err = f"groq asr call failed: {type(exc).__name__}: {exc}"
+            await _emit_verify_failed(session_factory, episode_id=episode_id, chunk_id=chunk_id, error=_err)
+            await _emit_stage_failed(session_factory, episode_id=episode_id, chunk_id=chunk_id, error=_err)
             raise
     elif whisperx_url:
         # Use local WhisperX service.
@@ -266,34 +275,25 @@ async def run_p2v_verify(
         try:
             transcript_data = await _call_whisperx(client, wav_bytes, language)
         except Exception as exc:
-            await _emit_verify_failed(
-                session_factory,
-                episode_id=episode_id,
-                chunk_id=chunk_id,
-                error=f"whisperx call failed: {type(exc).__name__}: {exc}",
-            )
+            _err = f"whisperx call failed: {type(exc).__name__}: {exc}"
+            await _emit_verify_failed(session_factory, episode_id=episode_id, chunk_id=chunk_id, error=_err)
+            await _emit_stage_failed(session_factory, episode_id=episode_id, chunk_id=chunk_id, error=_err)
             raise
         finally:
             await client.aclose()
     else:
-        await _emit_verify_failed(
-            session_factory,
-            episode_id=episode_id,
-            chunk_id=chunk_id,
-            error="ASR 未配置: 需要 Groq API Key 或 WhisperX URL",
-        )
-        raise DomainError("auth_required", "ASR 未配置: 需要 Groq API Key 或 WhisperX URL")
+        _err = "ASR 未配置: 需要 Groq API Key 或 WhisperX URL"
+        await _emit_verify_failed(session_factory, episode_id=episode_id, chunk_id=chunk_id, error=_err)
+        await _emit_stage_failed(session_factory, episode_id=episode_id, chunk_id=chunk_id, error=_err)
+        raise DomainError("auth_required", _err)
 
     # Validate transcript structure.
     try:
         transcript = WhisperXTranscript.model_validate(transcript_data)
     except Exception as exc:
-        await _emit_verify_failed(
-            session_factory,
-            episode_id=episode_id,
-            chunk_id=chunk_id,
-            error=f"transcript validation failed: {exc}",
-        )
+        _err = f"transcript validation failed: {exc}"
+        await _emit_verify_failed(session_factory, episode_id=episode_id, chunk_id=chunk_id, error=_err)
+        await _emit_stage_failed(session_factory, episode_id=episode_id, chunk_id=chunk_id, error=_err)
         raise DomainError(
             "invalid_state", f"transcript validation failed: {exc}"
         ) from exc
@@ -308,12 +308,9 @@ async def run_p2v_verify(
             content_type="application/json",
         )
     except Exception as exc:
-        await _emit_verify_failed(
-            session_factory,
-            episode_id=episode_id,
-            chunk_id=chunk_id,
-            error=f"transcript upload failed: {exc}",
-        )
+        _err = f"transcript upload failed: {exc}"
+        await _emit_verify_failed(session_factory, episode_id=episode_id, chunk_id=chunk_id, error=_err)
+        await _emit_stage_failed(session_factory, episode_id=episode_id, chunk_id=chunk_id, error=_err)
         raise
 
     # 6. Quality gate: 2-dimensional scoring via p2v_scoring.evaluate().
@@ -434,6 +431,28 @@ async def _emit_verify_failed(
             await session.commit()
     except Exception:  # pragma: no cover
         log.exception("failed to emit verify_failed event for chunk %s", chunk_id)
+
+
+async def _emit_stage_failed(
+    session_factory: _SessionFactory,
+    *,
+    episode_id: str,
+    chunk_id: str,
+    error: str,
+) -> None:
+    """Best-effort stage_failed event write — never masks the real error."""
+    try:
+        async with _session_scope(session_factory) as session:
+            await write_event(
+                session,
+                episode_id=episode_id,
+                chunk_id=chunk_id,
+                kind="stage_failed",
+                payload={"stage": "p2v", "error": error},
+            )
+            await session.commit()
+    except Exception:  # pragma: no cover
+        log.exception("failed to emit stage_failed event for chunk %s", chunk_id)
 
 
 # ---------------------------------------------------------------------------

@@ -81,49 +81,87 @@ async def _load_script(storage: MinIOStorage, episode_id: str) -> dict[str, Any]
     return parsed
 
 
+async def _emit_stage_failed(
+    session_maker: async_sessionmaker[AsyncSession],
+    *,
+    episode_id: str,
+    error: str,
+) -> None:
+    """Best-effort stage_failed event write — never masks the real error."""
+    try:
+        async with session_maker() as session:
+            async with session.begin():
+                await write_event(
+                    session,
+                    episode_id=episode_id,
+                    chunk_id=None,
+                    kind="stage_failed",
+                    payload={"stage": "p1", "error": error},
+                )
+    except Exception:  # pragma: no cover
+        logging.getLogger(__name__).exception(
+            "failed to emit stage_failed event for episode %s", episode_id
+        )
+
+
 async def _run_p1(ctx: P1Context, episode_id: str) -> P1Result:
-    script = await _load_script(ctx.storage, episode_id)
+    try:
+        script = await _load_script(ctx.storage, episode_id)
+    except Exception as exc:
+        await _emit_stage_failed(
+            ctx.session_maker, episode_id=episode_id, error=str(exc)
+        )
+        raise
 
     try:
         chunks = script_to_chunks(script, episode_id)
     except ValueError as exc:
+        await _emit_stage_failed(
+            ctx.session_maker, episode_id=episode_id, error=str(exc)
+        )
         raise DomainError("invalid_input", str(exc)) from exc
 
     async with ctx.session_maker() as session:
-        async with session.begin():
-            ep_repo = EpisodeRepo(session)
-            chunk_repo = ChunkRepo(session)
+        try:
+            async with session.begin():
+                ep_repo = EpisodeRepo(session)
+                chunk_repo = ChunkRepo(session)
 
-            episode = await ep_repo.get(episode_id)
-            if episode is None:
-                raise DomainError("not_found", f"episode not found: {episode_id}")
+                episode = await ep_repo.get(episode_id)
+                if episode is None:
+                    raise DomainError("not_found", f"episode not found: {episode_id}")
 
-            # stage_started — before any mutating work, so consumers see the
-            # pipeline move even if we end up raising later in the tx.
-            await write_event(
-                session,
-                episode_id=episode_id,
-                chunk_id=None,
-                kind="stage_started",
-                payload={"stage": "p1"},
+                # stage_started — before any mutating work, so consumers see the
+                # pipeline move even if we end up raising later in the tx.
+                await write_event(
+                    session,
+                    episode_id=episode_id,
+                    chunk_id=None,
+                    kind="stage_started",
+                    payload={"stage": "p1"},
+                )
+
+                # Clean slate: a re-run drops stale rows before inserting the
+                # newly-computed ones. We do this via a direct delete() so it is
+                # a single SQL statement inside the current transaction.
+                await session.execute(delete(Chunk).where(Chunk.episode_id == episode_id))
+
+                inserted = await chunk_repo.bulk_insert(chunks)
+
+                await ep_repo.set_status(episode_id, "ready")
+
+                await write_event(
+                    session,
+                    episode_id=episode_id,
+                    chunk_id=None,
+                    kind="stage_finished",
+                    payload={"stage": "p1", "chunk_count": inserted},
+                )
+        except Exception as exc:
+            await _emit_stage_failed(
+                ctx.session_maker, episode_id=episode_id, error=str(exc)
             )
-
-            # Clean slate: a re-run drops stale rows before inserting the
-            # newly-computed ones. We do this via a direct delete() so it is
-            # a single SQL statement inside the current transaction.
-            await session.execute(delete(Chunk).where(Chunk.episode_id == episode_id))
-
-            inserted = await chunk_repo.bulk_insert(chunks)
-
-            await ep_repo.set_status(episode_id, "ready")
-
-            await write_event(
-                session,
-                episode_id=episode_id,
-                chunk_id=None,
-                kind="stage_finished",
-                payload={"stage": "p1", "chunk_count": inserted},
-            )
+            raise
 
     return P1Result(episode_id=episode_id, chunks=chunks)
 

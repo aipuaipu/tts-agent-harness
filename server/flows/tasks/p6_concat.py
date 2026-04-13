@@ -61,6 +61,27 @@ from server.core.storage import (
 log = logging.getLogger(__name__)
 
 
+async def _emit_stage_failed(
+    session_factory: async_sessionmaker,
+    *,
+    episode_id: str,
+    error: str,
+) -> None:
+    """Best-effort stage_failed event write — never masks the real error."""
+    try:
+        async with session_factory() as session:
+            await events_module.write_event(
+                session,
+                episode_id=episode_id,
+                chunk_id=None,
+                kind="stage_failed",
+                payload={"stage": "p6", "error": error},
+            )
+            await session.commit()
+    except Exception:  # pragma: no cover
+        log.exception("failed to emit stage_failed event for episode %s", episode_id)
+
+
 # ---------------------------------------------------------------------------
 # Environment plumbing (kept tiny — A8-Flow will pass real deps later)
 # ---------------------------------------------------------------------------
@@ -137,19 +158,27 @@ async def run_p6_concat(
     chunk_repo = ChunkRepo(session)
     take_repo = TakeRepo(session)
 
+    # Resolve the session_factory for best-effort error events.
+    # We need this before any validation so pre-check errors can emit too.
+    _sf = _get_session_factory()
+
     episode = await ep_repo.get(episode_id)
     if episode is None:
+        await _emit_stage_failed(_sf, episode_id=episode_id, error=f"episode not found: {episode_id}")
         raise DomainError("not_found", f"episode not found: {episode_id}")
 
     chunks = list(await chunk_repo.list_by_episode(episode_id))
     if not chunks:
+        await _emit_stage_failed(_sf, episode_id=episode_id, error=f"episode has no chunks: {episode_id}")
         raise DomainError("invalid_state", f"episode has no chunks: {episode_id}")
 
     missing = [c.id for c in chunks if not c.selected_take_id]
     if missing:
+        msg = f"chunks missing selected_take_id: {missing}"
+        await _emit_stage_failed(_sf, episode_id=episode_id, error=msg)
         raise DomainError(
             "invalid_state",
-            f"chunks missing selected_take_id: {missing}",
+            msg,
         )
 
     # Fetch takes + build timing list.
@@ -158,9 +187,11 @@ async def run_p6_concat(
     for c in chunks:
         take = await take_repo.select(c.selected_take_id)  # type: ignore[arg-type]
         if take is None:
+            msg = f"take not found for chunk {c.id}: {c.selected_take_id}"
+            await _emit_stage_failed(_sf, episode_id=episode_id, error=msg)
             raise DomainError(
                 "not_found",
-                f"take not found for chunk {c.id}: {c.selected_take_id}",
+                msg,
             )
         take_ids[c.id] = take.id
         timings.append(
@@ -185,9 +216,11 @@ async def run_p6_concat(
         timings = [t for t in timings if t.duration_s > 0]
 
     if not timings:
+        msg = f"episode has no non-empty chunks: {episode_id}"
+        await _emit_stage_failed(_sf, episode_id=episode_id, error=msg)
         raise DomainError(
             "invalid_state",
-            f"episode has no non-empty chunks: {episode_id}",
+            msg,
         )
 
     # ------------------------------------------------------------------
@@ -269,6 +302,9 @@ async def run_p6_concat(
         # Upload finals (overwrite on re-run — MinIO put_object replaces).
         wav_uri = await storage.upload_file(final_wav_key(episode_id), wav_out)
         srt_uri = await storage.upload_file(final_srt_key(episode_id), srt_out)
+    except Exception as exc:
+        await _emit_stage_failed(_sf, episode_id=episode_id, error=str(exc))
+        raise
     finally:
         if cleanup_tmp:
             try:
