@@ -202,7 +202,20 @@ async def run_p5_subtitles(chunk_id: str) -> P5Result:
     # 4. Compose SRT (pure). Prefer the duration carried on the take
     #    because that is what the user's audio actually sounds like; the
     #    transcript's ``duration_s`` is informational only.
-    srt_doc, line_count = compose_srt(source_text, total_duration)
+    #
+    #    Extract word-level timestamps from the transcript for precise
+    #    alignment. Falls back to char-weighted distribution if no words.
+    words_raw = [
+        {"word": w.word, "start": w.start, "end": w.end}
+        for w in transcript.transcript
+    ]
+    chunk_start = words_raw[0]["start"] if words_raw else 0.0
+    srt_doc, line_count = compose_srt(
+        source_text,
+        total_duration,
+        transcript_words=words_raw or None,
+        chunk_start=chunk_start,
+    )
     if line_count == 0:
         # All-control-marker / empty text after stripping.
         await _emit_stage_failed(

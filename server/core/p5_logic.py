@@ -6,10 +6,12 @@ unit-testable and — more importantly — **deterministic**.
 
 Pipeline (all driven by callers):
 
-1. ``strip_control_markers(text)``      — remove S2-Pro control markers
-2. ``split_subtitle_lines(display)``    — split the cleaned text into cues
-3. ``distribute_timestamps(lines, T)``  — char-weighted time allocation
-4. ``build_srt(cues)``                  — serialize to SRT wire format
+1. ``strip_control_markers(text)``                — remove S2-Pro control markers
+2. ``split_subtitle_lines(display, max_chars)``   — smart line splitting
+3. ``distribute_timestamps(lines, T)``            — char-weighted fallback
+   ``distribute_timestamps_with_words(lines, words, chunk_start)``
+                                                   — word-level alignment (primary)
+4. ``build_srt(cues)``                            — serialize to SRT wire format
 
 The algorithm is documented inline because the "why" matters more than the
 "what" for future maintainers.
@@ -73,41 +75,109 @@ STRIPPABLE_MARKERS = frozenset(_NAMED_MARKERS)
 
 
 # ---------------------------------------------------------------------------
-# 2. Split into subtitle lines
+# 2. Split into subtitle lines (smart, ported from JS p5-subtitles.js)
 # ---------------------------------------------------------------------------
 
-# Sentence-terminating punctuation: Chinese + English.
-# We keep the terminator attached to the preceding sentence (common SRT
-# convention).  Semicolons / commas do **not** split — they would produce
-# too many tiny cues.
-_SENTENCE_SPLIT_RE = re.compile(r"(?<=[。？！?!.…])")
+# Split at sentence-ending AND clause-ending punctuation (commas, enumeration
+# commas, semicolons). The terminator stays attached to the preceding text.
+_SPLIT_RE = re.compile(r"(?<=[。？！，、；,])")
+
+# For detecting "pure punctuation" lines that should merge into the previous.
+_STRIP_PUNCT_RE = re.compile(
+    r"[\s，。、；：？！\u201c\u201d\u2018\u2019（）《》【】\-—…·,.;:?!()\[\]{}\"\'/\\\u200b\u3000]"
+)
+
+_DEFAULT_MAX_LINE_CHARS = 20
 
 
-def split_subtitle_lines(display_text: str) -> list[str]:
+def _is_chinese(c: str) -> bool:
+    return "\u4e00" <= c <= "\u9fff"
+
+
+def split_subtitle_lines(
+    display_text: str,
+    max_line_chars: int = _DEFAULT_MAX_LINE_CHARS,
+) -> list[str]:
     """Split display-ready text into subtitle lines (one per SRT cue).
 
-    Rules:
+    Ported from the original JS ``splitSubtitleLines`` with identical
+    semantics:
 
-    - Split on Chinese/English full-stop / question / exclamation, keeping
-      the terminator with its sentence.
-    - Also split on hard newlines (authors may pre-break lines manually).
-    - Drop purely-whitespace segments.
-    - Strip leading/trailing whitespace on each line.
-
-    A chunk that contains no sentence terminators becomes exactly one line.
+    - Split on sentence-ending **and** clause-ending punctuation (commas,
+      enumeration commas, semicolons) — not just full stops.
+    - Short consecutive parts are merged when they fit within
+      *max_line_chars* (buffer accumulation).
+    - Oversized parts are broken intelligently:
+      1. Prefer space boundaries.
+      2. Fall back to Chinese/Latin script boundaries.
+      3. Never split an English word.
+    - Pure-punctuation lines are merged into the preceding line.
+    - Hard newlines still act as forced cue breaks.
     """
     if not display_text or not display_text.strip():
         return []
 
-    lines: list[str] = []
+    raw_lines: list[str] = []
     # First split on explicit newlines so authors can force cue breaks.
     for paragraph in display_text.split("\n"):
-        parts = _SENTENCE_SPLIT_RE.split(paragraph)
+        parts = _SPLIT_RE.split(paragraph)
+        buffer = ""
         for part in parts:
-            s = part.strip()
-            if s:
-                lines.append(s)
-    return lines
+            if not part:
+                continue
+            if len(buffer) + len(part) <= max_line_chars:
+                buffer += part
+            else:
+                if buffer:
+                    raw_lines.append(buffer)
+                if len(part) > max_line_chars:
+                    # Smart break: space > CJK/Latin boundary > hard cut
+                    remaining = part
+                    while len(remaining) > max_line_chars:
+                        cut_at = max_line_chars
+                        # 1. Prefer space
+                        space_idx = remaining.rfind(" ", 0, max_line_chars)
+                        if space_idx > int(max_line_chars * 0.4):
+                            cut_at = space_idx + 1
+                        else:
+                            # 2. CJK/Latin boundary (scan right-to-left)
+                            found = False
+                            for j in range(
+                                max_line_chars,
+                                int(max_line_chars * 0.4),
+                                -1,
+                            ):
+                                prev_c = remaining[j - 1] if j - 1 >= 0 else ""
+                                cur_c = remaining[j] if j < len(remaining) else ""
+                                if (_is_chinese(prev_c) and re.match(r"[a-zA-Z0-9]", cur_c)) or (
+                                    re.match(r"[a-zA-Z0-9]", prev_c) and _is_chinese(cur_c)
+                                ):
+                                    cut_at = j
+                                    found = True
+                                    break
+                            if not found:
+                                cut_at = max_line_chars
+                        raw_lines.append(remaining[:cut_at])
+                        remaining = remaining[cut_at:]
+                    if remaining:
+                        raw_lines.append(remaining)
+                    buffer = ""
+                else:
+                    buffer = part
+        if buffer:
+            raw_lines.append(buffer)
+
+    # Merge pure-punctuation lines into the previous line.
+    filtered: list[str] = []
+    for line in raw_lines:
+        stripped = _STRIP_PUNCT_RE.sub("", line)
+        if len(stripped) == 0 and filtered:
+            filtered[-1] += line
+        else:
+            filtered.append(line)
+
+    # Trim whitespace on each line (e.g. leading space from ", text" splits).
+    return [line.strip() for line in filtered if line.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +250,85 @@ def distribute_timestamps(
 
 
 # ---------------------------------------------------------------------------
+# 3b. Word-level timestamp distribution (primary path)
+# ---------------------------------------------------------------------------
+
+
+def distribute_timestamps_with_words(
+    lines: list[str],
+    words: list[dict],
+    chunk_start: float,
+) -> list[tuple[float, float]]:
+    """Assign ``(start, end)`` to each line using WhisperX word timestamps.
+
+    Ported from the original JS word-level alignment algorithm:
+
+    1. Filter *words* to those having both ``start`` and ``end``.
+    2. Compute per-line character weight (punctuation stripped, min 1).
+    3. Proportionally assign words to lines by weight.
+    4. Last line always gets all remaining words.
+    5. Each line's start/end = first/last assigned word's start/end,
+       offset by *chunk_start* so times are chunk-relative (from 0).
+
+    Parameters
+    ----------
+    lines : list[str]
+        Subtitle lines (from :func:`split_subtitle_lines`).
+    words : list[dict]
+        WhisperX word dicts with ``word``, ``start``, ``end`` keys.
+    chunk_start : float
+        Absolute start time of the chunk (subtracted from word times).
+
+    Returns
+    -------
+    list[tuple[float, float]]
+        Same shape as :func:`distribute_timestamps` for drop-in use.
+    """
+    if not lines:
+        return []
+
+    # Filter to words with valid timestamps.
+    valid_words = [w for w in words if w.get("start") is not None and w.get("end") is not None]
+    if not valid_words:
+        return [(0.0, 0.0) for _ in lines]
+
+    # Character weights (stripped of punctuation, min 1).
+    weights = [max(1, len(_STRIP_PUNCT_RE.sub("", line))) for line in lines]
+    total_weight = sum(weights)
+
+    cues: list[tuple[float, float]] = []
+    word_cursor = 0
+
+    for i, w in enumerate(weights):
+        is_last = i == len(lines) - 1
+        ratio = w / total_weight
+        words_for_line = (
+            len(valid_words) - word_cursor
+            if is_last
+            else max(1, round(ratio * len(valid_words)))
+        )
+        if words_for_line <= 0 or word_cursor >= len(valid_words):
+            # Exhausted words — snap to last known time.
+            if cues:
+                last_end = cues[-1][1]
+                cues.append((last_end, last_end))
+            else:
+                cues.append((0.0, 0.0))
+            continue
+
+        first_idx = word_cursor
+        last_idx = min(word_cursor + words_for_line - 1, len(valid_words) - 1)
+
+        line_start = max(0.0, valid_words[first_idx]["start"] - chunk_start)
+        line_end = max(0.0, valid_words[last_idx]["end"] - chunk_start)
+
+        cues.append((round(line_start, 3), round(line_end, 3)))
+        word_cursor = last_idx + 1
+
+    return cues
+
+
+# ---------------------------------------------------------------------------
 # 4. SRT serialization
 # ---------------------------------------------------------------------------
 
@@ -227,18 +376,40 @@ def build_srt(cues: list[tuple[float, float, str]]) -> str:
 def compose_srt(
     source_text: str,
     total_duration: float,
+    *,
+    transcript_words: list[dict] | None = None,
+    chunk_start: float = 0.0,
+    max_line_chars: int = _DEFAULT_MAX_LINE_CHARS,
 ) -> tuple[str, int]:
     """One-shot transform: raw chunk text → (srt_document, line_count).
 
     This is the public entry point used by the Prefect task. Keeping the
     orchestration here (instead of in the task file) means the I/O layer
     shrinks to "read transcript → call compose_srt → upload SRT".
+
+    Parameters
+    ----------
+    transcript_words : list[dict] | None
+        If provided and non-empty, word-level timestamps from WhisperX are
+        used to align subtitle cues (primary path). Otherwise falls back to
+        char-weighted distribution.
+    chunk_start : float
+        Absolute start time of the chunk audio in the transcript timeline.
+        Used to compute chunk-relative timestamps when *transcript_words*
+        is provided.
+    max_line_chars : int
+        Maximum characters per subtitle line for the smart splitter.
     """
     display = strip_control_markers(source_text)
-    lines = split_subtitle_lines(display)
+    lines = split_subtitle_lines(display, max_line_chars=max_line_chars)
     if not lines:
         return "", 0
-    timings = distribute_timestamps(lines, total_duration)
+
+    if transcript_words:
+        timings = distribute_timestamps_with_words(lines, transcript_words, chunk_start)
+    else:
+        timings = distribute_timestamps(lines, total_duration)
+
     cues = [(start, end, text) for (start, end), text in zip(timings, lines)]
     return build_srt(cues), len(lines)
 
@@ -248,6 +419,7 @@ __all__ = [
     "strip_control_markers",
     "split_subtitle_lines",
     "distribute_timestamps",
+    "distribute_timestamps_with_words",
     "build_srt",
     "compose_srt",
 ]
