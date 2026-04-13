@@ -11,7 +11,7 @@ import os
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, Query, UploadFile
 from minio.error import S3Error
 from pydantic import BaseModel
 from server.core.domain import _CamelBase
@@ -384,6 +384,7 @@ async def delete_episode(
 async def run_episode(
     episode_id: str,
     body: RunRequest | None = None,
+    x_fish_key: str | None = Header(None, alias="X-Fish-Key"),
     session: AsyncSession = Depends(get_session),
     prefect_client: Any = Depends(get_prefect_client),
 ) -> RunResponse:
@@ -430,6 +431,21 @@ async def run_episode(
         # Dev mode: run flow in-process as a background task
         from server.flows.worker_bootstrap import bootstrap as _bootstrap
         _bootstrap()
+
+        # Resolve Fish API key for modes that use P2 (not chunk_only)
+        if mode != "chunk_only":
+            fish_key = x_fish_key or os.environ.get("FISH_TTS_KEY", "")
+            if not fish_key:
+                raise DomainError("auth_required", "Fish API Key 未配置。请在设置中填入 API Key。")
+            # Re-configure P2 with the resolved key (may differ from env var)
+            from server.flows.tasks.p2_synth import configure_p2_dependencies
+            from server.core.fish_client import FishTTSClient
+            from server.flows.worker_bootstrap import _session_factory, _storage
+            configure_p2_dependencies(
+                session_factory=_session_factory,
+                storage=_storage,
+                fish_client_factory=lambda: FishTTSClient(api_key=fish_key),
+            )
 
         async def _run_dev():
             """Dev mode: run pipeline stages directly (no Prefect decorators)."""
@@ -744,6 +760,7 @@ async def retry_chunk(
     chunk_id: str,
     from_stage: str = "p2",
     cascade: bool = True,
+    x_fish_key: str | None = Header(None, alias="X-Fish-Key"),
     session: AsyncSession = Depends(get_session),
     prefect_client: Any = Depends(get_prefect_client),
 ) -> RetryResponse:
@@ -771,6 +788,20 @@ async def retry_chunk(
         from server.flows.worker_bootstrap import bootstrap as _bootstrap
         from datetime import datetime, timezone
         _bootstrap()
+
+        # Resolve Fish API key for P2 stage
+        if from_stage == "p2":
+            fish_key = x_fish_key or os.environ.get("FISH_TTS_KEY", "")
+            if not fish_key:
+                raise DomainError("auth_required", "Fish API Key 未配置。请在设置中填入 API Key。")
+            from server.flows.tasks.p2_synth import configure_p2_dependencies
+            from server.core.fish_client import FishTTSClient
+            from server.flows.worker_bootstrap import _session_factory as _sf, _storage as _st
+            configure_p2_dependencies(
+                session_factory=_sf,
+                storage=_st,
+                fish_client_factory=lambda: FishTTSClient(api_key=fish_key),
+            )
 
         async def _retry_dev():
             import logging

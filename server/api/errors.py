@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 
 _STATUS_MAP: dict[str, int] = {
     "not_found": 404,
+    "auth_required": 401,
     "invalid_input": 422,
     "invalid_state": 409,
     "lock_busy": 423,
