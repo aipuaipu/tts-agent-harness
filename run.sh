@@ -73,7 +73,7 @@ if [[ ! -f "$TRACE" ]]; then
 fi
 
 should_run() {
-  local steps=("p1" "p2" "check2" "p3" "check3" "p5" "p6" "checkp6" "v2")
+  local steps=("p1" "p2" "p2c" "p3" "p2v" "p5" "p6" "checkp6" "v2")
   local found=false
   for s in "${steps[@]}"; do
     [[ "$s" == "$FROM_STEP" ]] && found=true
@@ -110,7 +110,7 @@ if should_run p2; then
 fi
 
 # --- Post-P2 deterministic pre-check ---
-if should_run check2; then
+if should_run p2c; then
   echo ""
   node "$HARNESS_DIR/scripts/precheck.js" \
     --stage p2 \
@@ -152,7 +152,7 @@ fi
 if should_run p3; then
   echo ""
   echo "=== P3: Batch Transcription (via HTTP) ==="
-  # 构建 P3_URLS（start-p3-server.sh 已 export，但 check3 分支也要用，显式重建以防万一）
+  # 构建 P3_URLS（start-p3-server.sh 已 export，但 p2v 分支也要用，显式重建以防万一）
   if [[ -z "${P3_URLS:-}" ]]; then
     _urls=""
     for ((i=0; i<P3_WORKERS; i++)); do
@@ -169,7 +169,7 @@ if should_run p3; then
 fi
 
 # --- Post-P3 deterministic pre-check ---
-if should_run check3; then
+if should_run p2v; then
   echo ""
   node "$HARNESS_DIR/scripts/precheck.js" \
     --stage p3 \

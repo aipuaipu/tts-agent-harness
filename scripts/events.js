@@ -23,7 +23,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const VALID_STAGES = ["p2", "check2", "p3", "check3", "p5"];
+const VALID_STAGES = ["p2", "p2c", "p3", "p2v", "p5"];
 
 function _appendJsonl(p, obj) {
   fs.mkdirSync(path.dirname(p), { recursive: true });

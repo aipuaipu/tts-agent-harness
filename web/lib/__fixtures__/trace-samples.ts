@@ -5,7 +5,7 @@
  *
  * Three scenarios:
  *   - ALL_OK:       every chunk passes every stage
- *   - PARTIAL_FAIL: some chunks fail at check3 (char ratio mismatch)
+ *   - PARTIAL_FAIL: some chunks fail at p2v (char ratio mismatch)
  *   - WITH_RETRY:   one chunk failed p2 once then succeeded on attempt 2
  */
 
@@ -13,7 +13,7 @@ export interface TraceEvent {
   ts: string;
   type: "stage.start" | "stage.end";
   chunkId: string;
-  stage: "p2" | "check2" | "p3" | "check3" | "p5";
+  stage: "p2" | "p2c" | "p2v" | "p5";
   attempt?: number;
   status?: "ok" | "fail";
   durationMs?: number;
@@ -57,30 +57,26 @@ function stage(
 export const TRACE_ALL_OK: TraceEvent[] = [
   ...stage("shot01_chunk01", "p2", 0, 4200),
   ...stage("shot01_chunk02", "p2", 100, 5000),
-  ...stage("shot01_chunk01", "check2", 4300, 50),
-  ...stage("shot01_chunk02", "check2", 5200, 50),
-  ...stage("shot01_chunk01", "p3", 6000, 2500),
-  ...stage("shot01_chunk02", "p3", 8600, 2300),
-  ...stage("shot01_chunk01", "check3", 8600, 10),
-  ...stage("shot01_chunk02", "check3", 11000, 10),
+  ...stage("shot01_chunk01", "p2c", 4300, 50),
+  ...stage("shot01_chunk02", "p2c", 5200, 50),
+  ...stage("shot01_chunk01", "p2v", 6000, 2500),
+  ...stage("shot01_chunk02", "p2v", 8600, 2300),
   ...stage("shot01_chunk01", "p5", 11500, 200),
   ...stage("shot01_chunk02", "p5", 11800, 200),
 ];
 
 // ────────────────────────────────────────────────────────────
-// Scenario 2: chunk02 fails check3 (char ratio 0.54)
+// Scenario 2: chunk02 fails p2v (char ratio 0.54)
 // ────────────────────────────────────────────────────────────
 export const TRACE_PARTIAL_FAIL: TraceEvent[] = [
   ...stage("shot01_chunk01", "p2", 0, 4200),
   ...stage("shot01_chunk02", "p2", 100, 5000),
-  ...stage("shot01_chunk01", "check2", 4300, 50),
-  ...stage("shot01_chunk02", "check2", 5200, 50),
-  ...stage("shot01_chunk01", "p3", 6000, 2500),
-  ...stage("shot01_chunk02", "p3", 8600, 2300),
-  ...stage("shot01_chunk01", "check3", 8600, 10),
+  ...stage("shot01_chunk01", "p2c", 4300, 50),
+  ...stage("shot01_chunk02", "p2c", 5200, 50),
+  ...stage("shot01_chunk01", "p2v", 6000, 2500),
   ...stage(
     "shot01_chunk02",
-    "check3",
+    "p2v",
     11000,
     10,
     "fail",
@@ -96,9 +92,8 @@ export const TRACE_PARTIAL_FAIL: TraceEvent[] = [
 export const TRACE_WITH_RETRY: TraceEvent[] = [
   ...stage("shot01_chunk01", "p2", 0, 3000, "fail", "HTTP 500 from Fish API", 1),
   ...stage("shot01_chunk01", "p2", 3500, 4200, "ok", undefined, 2),
-  ...stage("shot01_chunk01", "check2", 7800, 50),
-  ...stage("shot01_chunk01", "p3", 8000, 2500),
-  ...stage("shot01_chunk01", "check3", 10600, 10),
+  ...stage("shot01_chunk01", "p2c", 7800, 50),
+  ...stage("shot01_chunk01", "p2v", 8000, 2500),
   ...stage("shot01_chunk01", "p5", 10800, 200),
 ];
 

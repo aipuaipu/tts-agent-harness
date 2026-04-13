@@ -8,10 +8,10 @@
  *   node scripts/precheck.js --stage p3 --chunks <chunks.json> --transcripts <dir> [--trace <path>]
  *
  * Per-chunk pipeline events:
- *   stage "p2"      → event stage "check2"
- *   stage "post-p2" → event stage "check2"
- *   stage "p3"      → event stage "check3"
- *   stage "post-p3" → event stage "check3"
+ *   stage "p2"      → event stage "p2c"
+ *   stage "post-p2" → event stage "p2c"
+ *   stage "p3"      → event stage "p2v"
+ *   stage "post-p3" → event stage "p2v"
  */
 
 const fs = require("fs");
@@ -39,10 +39,10 @@ if (!stage || !chunksPath) {
   process.exit(1);
 }
 
-// Map --stage to event stage name (check2 | check3)
+// Map --stage to event stage name (p2c | p2v)
 let eventStage = "";
-if (stage === "p2" || stage === "post-p2") eventStage = "check2";
-else if (stage === "p3" || stage === "post-p3") eventStage = "check3";
+if (stage === "p2" || stage === "post-p2") eventStage = "p2c";
+else if (stage === "p3" || stage === "post-p3") eventStage = "p2v";
 else {
   console.error(`Invalid --stage: ${stage} (expected p2|p3|post-p2|post-p3)`);
   process.exit(1);

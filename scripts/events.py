@@ -4,7 +4,7 @@ Python mirror of scripts/events.js — per-chunk pipeline events + stage logs.
 Keep the contract identical to events.js:
 - trace.jsonl is append-only
 - event types: stage.start / stage.end
-- valid stages: p2 | check2 | p3 | check3 | p5
+- valid stages: p2 | p2c | p2v | p5
 - per-chunk log path: .work/<ep>/logs/<cid>/<stage>.log
 
 Usage:
@@ -23,7 +23,7 @@ import json
 import os
 from datetime import datetime, timezone
 
-VALID_STAGES = ("p2", "check2", "p3", "check3", "p5")
+VALID_STAGES = ("p2", "p2c", "p3", "p2v", "p5")
 
 
 def _now_iso() -> str:
