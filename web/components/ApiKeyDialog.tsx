@@ -96,6 +96,9 @@ export function ApiKeyDialog({ open, onClose }: Props) {
             <h3 className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
               Fish Audio API Key
             </h3>
+            <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
+              用于 TTS 语音合成（P2 阶段）。<strong className="text-neutral-700 dark:text-neutral-300">必填</strong>，否则无法合成音频。
+            </p>
 
             {fishHasSaved && (
               <div className="text-xs text-neutral-500 dark:text-neutral-400">
@@ -161,6 +164,9 @@ export function ApiKeyDialog({ open, onClose }: Props) {
             <h3 className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
               Groq API Key
             </h3>
+            <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
+              用于 ASR 语音转写（P2v 阶段）。<strong className="text-neutral-700 dark:text-neutral-300">必填</strong>，否则无法验证发音质量和生成字幕时间戳。免费额度足够日常使用。
+            </p>
 
             {groqHasSaved && (
               <div className="text-xs text-neutral-500 dark:text-neutral-400">
