@@ -385,6 +385,7 @@ async def run_episode(
     episode_id: str,
     body: RunRequest | None = None,
     x_fish_key: str | None = Header(None, alias="X-Fish-Key"),
+    x_groq_key: str | None = Header(None, alias="X-Groq-Key"),
     session: AsyncSession = Depends(get_session),
     prefect_client: Any = Depends(get_prefect_client),
 ) -> RunResponse:
@@ -445,6 +446,17 @@ async def run_episode(
                 session_factory=_session_factory,
                 storage=_storage,
                 fish_client_factory=lambda: FishTTSClient(api_key=fish_key),
+            )
+
+            # Re-configure P2v with Groq key (if available)
+            groq_key = x_groq_key or os.environ.get("GROQ_API_KEY", "")
+            from server.flows.tasks.p2v_verify import configure_p2v_dependencies
+            configure_p2v_dependencies(
+                session_factory=_session_factory,
+                storage=_storage,
+                whisperx_url=os.environ.get("WHISPERX_URL", "http://localhost:7860"),
+                groq_api_key=groq_key or None,
+                groq_proxy=os.environ.get("HTTPS_PROXY"),
             )
 
         async def _run_dev():
@@ -761,6 +773,7 @@ async def retry_chunk(
     from_stage: str = "p2",
     cascade: bool = True,
     x_fish_key: str | None = Header(None, alias="X-Fish-Key"),
+    x_groq_key: str | None = Header(None, alias="X-Groq-Key"),
     session: AsyncSession = Depends(get_session),
     prefect_client: Any = Depends(get_prefect_client),
 ) -> RetryResponse:
@@ -801,6 +814,19 @@ async def retry_chunk(
                 session_factory=_sf,
                 storage=_st,
                 fish_client_factory=lambda: FishTTSClient(api_key=fish_key),
+            )
+
+        # Re-configure P2v with Groq key for stages that use ASR
+        if from_stage in ("p2", "p2v", "p3"):
+            from server.flows.tasks.p2v_verify import configure_p2v_dependencies
+            from server.flows.worker_bootstrap import _session_factory as _sf2, _storage as _st2
+            groq_key = x_groq_key or os.environ.get("GROQ_API_KEY", "")
+            configure_p2v_dependencies(
+                session_factory=_sf2,
+                storage=_st2,
+                whisperx_url=os.environ.get("WHISPERX_URL", "http://localhost:7860"),
+                groq_api_key=groq_key or None,
+                groq_proxy=os.environ.get("HTTPS_PROXY"),
             )
 
         async def _retry_dev():

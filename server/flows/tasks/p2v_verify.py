@@ -78,6 +78,8 @@ _session_factory: _SessionFactory | None = None
 _storage: MinIOStorage | None = None
 _http_client_factory: Callable[[], httpx.AsyncClient] | None = None
 _whisperx_url: str = DEFAULT_WHISPERX_URL
+_groq_api_key: str | None = None
+_groq_proxy: str | None = None
 
 
 def configure_p2v_dependencies(
@@ -86,13 +88,18 @@ def configure_p2v_dependencies(
     storage: MinIOStorage,
     http_client_factory: Callable[[], httpx.AsyncClient] | None = None,
     whisperx_url: str = DEFAULT_WHISPERX_URL,
+    groq_api_key: str | None = None,
+    groq_proxy: str | None = None,
 ) -> None:
     """Inject process-wide dependencies for the p2v_verify task."""
     global _session_factory, _storage, _http_client_factory, _whisperx_url
+    global _groq_api_key, _groq_proxy
     _session_factory = session_factory
     _storage = storage
     _http_client_factory = http_client_factory
     _whisperx_url = whisperx_url
+    _groq_api_key = groq_api_key
+    _groq_proxy = groq_proxy
 
 
 def _require_deps() -> tuple[_SessionFactory, MinIOStorage]:
@@ -234,20 +241,48 @@ async def run_p2v_verify(
         )
         raise DomainError("invalid_state", f"take WAV is empty for chunk {chunk_id}")
 
-    # 4. POST to whisperx-svc.
-    client = _get_http_client()
-    try:
-        transcript_data = await _call_whisperx(client, wav_bytes, language)
-    except Exception as exc:
+    # 4. ASR transcription: Groq Whisper (if configured) or local WhisperX.
+    groq_key = _groq_api_key or os.environ.get("GROQ_API_KEY", "")
+    whisperx_url = _whisperx_url or os.environ.get("WHISPERX_URL", "")
+
+    if groq_key:
+        # Use Groq Whisper API.
+        from server.core.groq_asr_client import GroqASRClient
+
+        groq_client = GroqASRClient(api_key=groq_key, proxy=_groq_proxy)
+        try:
+            transcript_data = await groq_client.transcribe(wav_bytes, language)
+        except Exception as exc:
+            await _emit_verify_failed(
+                session_factory,
+                episode_id=episode_id,
+                chunk_id=chunk_id,
+                error=f"groq asr call failed: {type(exc).__name__}: {exc}",
+            )
+            raise
+    elif whisperx_url:
+        # Use local WhisperX service.
+        client = _get_http_client()
+        try:
+            transcript_data = await _call_whisperx(client, wav_bytes, language)
+        except Exception as exc:
+            await _emit_verify_failed(
+                session_factory,
+                episode_id=episode_id,
+                chunk_id=chunk_id,
+                error=f"whisperx call failed: {type(exc).__name__}: {exc}",
+            )
+            raise
+        finally:
+            await client.aclose()
+    else:
         await _emit_verify_failed(
             session_factory,
             episode_id=episode_id,
             chunk_id=chunk_id,
-            error=f"whisperx call failed: {type(exc).__name__}: {exc}",
+            error="ASR 未配置: 需要 Groq API Key 或 WhisperX URL",
         )
-        raise
-    finally:
-        await client.aclose()
+        raise DomainError("auth_required", "ASR 未配置: 需要 Groq API Key 或 WhisperX URL")
 
     # Validate transcript structure.
     try:
