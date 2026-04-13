@@ -13,7 +13,7 @@ const STORAGE_KEY = "tts-harness-logviewer-h";
 export function LogViewer({ log }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(128);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const draggingRef = useRef(false);
 
   // 初始从 localStorage 恢复高度
