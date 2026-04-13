@@ -79,10 +79,17 @@ export const ChunkRow = memo(function ChunkRow({
   const onPlay = () => togglePlay(chunk.id);
   const onEdit = () => startEditing(chunk.id);
 
+  const seekingRef = useRef(false);
+
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
     if (isPlaying) {
+      // Skip if handleSeek is managing play
+      if (seekingRef.current) {
+        seekingRef.current = false;
+        return;
+      }
       el.play().catch((e) => {
         console.warn("audio play failed", e);
       });
@@ -139,13 +146,21 @@ export const ChunkRow = memo(function ChunkRow({
     };
 
     if (!isPlaying) {
-      // Start playing this chunk first, then seek once audio is ready
-      onPlay();
-      if (el.readyState >= 1) {
+      // Start playing, then seek after play starts
+      const playAndSeek = async () => {
+        seekingRef.current = true;
+        onPlay();
+        // Wait for audio to be ready before seeking
+        if (el.readyState < 1) {
+          await new Promise<void>((resolve) =>
+            el.addEventListener("loadedmetadata", () => resolve(), { once: true })
+          );
+        }
         doSeek();
-      } else {
-        el.addEventListener("loadedmetadata", doSeek, { once: true });
-      }
+        // Ensure play happens after seek
+        try { await el.play(); } catch {}
+      };
+      playAndSeek();
     } else {
       doSeek();
     }
