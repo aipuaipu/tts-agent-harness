@@ -144,6 +144,14 @@ export default function Page() {
                 episode={episode}
                 running={running}
                 onRun={async (mode) => { await store.runEpisode(mode); await mutateDetail(); await mutateList(); }}
+                onCancel={async () => {
+                  try {
+                    const res = await fetch(`${getApiUrl()}/episodes/${episode.id}/cancel`, { method: "POST" });
+                    if (!res.ok) throw new Error(await res.text());
+                    await mutateDetail();
+                    await mutateList();
+                  } catch (e) { toast.error("取消失败", { description: (e as Error).message }); }
+                }}
                 onViewScript={() => setScriptPreviewOpen(true)}
                 onApiKeyClick={() => setApiKeyOpen(true)}
                 failedCount={failedCount}

@@ -6,10 +6,14 @@ validate input → call repo → return response model.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from datetime import datetime
 from typing import Any
+
+# In-flight run tasks — cancel support
+_running_tasks: dict[str, asyncio.Task] = {}  # episode_id → Task
 
 from fastapi import APIRouter, Depends, File, Form, Header, Query, UploadFile
 from minio.error import S3Error
@@ -721,7 +725,9 @@ async def run_episode(
                 except Exception:
                     pass
 
-        asyncio.create_task(_run_dev())
+        task = asyncio.create_task(_run_dev())
+        _running_tasks[episode_id] = task
+        task.add_done_callback(lambda _: _running_tasks.pop(episode_id, None))
 
     await repo.set_status(episode_id, "running")
 
@@ -1122,6 +1128,37 @@ async def unlock_episode(
     await repo.set_locked(episode_id, False)
     await session.commit()
     return LockResponse(locked=False)
+
+
+# ---------------------------------------------------------------------------
+# POST /episodes/{id}/cancel
+# ---------------------------------------------------------------------------
+
+
+class CancelResponse(_CamelBase):
+    cancelled: bool
+
+
+@router.post("/episodes/{episode_id}/cancel", response_model=CancelResponse)
+async def cancel_episode(
+    episode_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> CancelResponse:
+    """Cancel a running episode pipeline."""
+    repo = EpisodeRepo(session)
+    ep = await repo.get(episode_id)
+    if ep is None:
+        raise DomainError("not_found", f"episode '{episode_id}' not found")
+    if ep.status != "running":
+        raise DomainError("invalid_state", "episode is not running")
+
+    task = _running_tasks.get(episode_id)
+    if task and not task.done():
+        task.cancel()
+
+    await repo.set_status(episode_id, "ready")
+    await session.commit()
+    return CancelResponse(cancelled=True)
 
 
 # ---------------------------------------------------------------------------

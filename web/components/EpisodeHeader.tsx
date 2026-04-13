@@ -10,6 +10,7 @@ interface Props {
   episode: Episode;
   running: boolean;
   onRun: (mode: string) => void;
+  onCancel?: () => void;
   onViewScript?: () => void;
   onApiKeyClick?: () => void;
   failedCount?: number;
@@ -26,7 +27,7 @@ const STATUS_BADGE: Record<
   empty: { bg: "bg-neutral-50 dark:bg-neutral-800", fg: "text-neutral-500 dark:text-neutral-400", br: "border-neutral-200 dark:border-neutral-700", label: "empty" },
 };
 
-export function EpisodeHeader({ episode, running, onRun, onViewScript, onApiKeyClick, failedCount = 0 }: Props) {
+export function EpisodeHeader({ episode, running, onRun, onCancel, onViewScript, onApiKeyClick, failedCount = 0 }: Props) {
   const badge = STATUS_BADGE[episode.status] ?? STATUS_BADGE.ready;
   const { resolvedTheme, setTheme } = useTheme();
 
@@ -37,7 +38,7 @@ export function EpisodeHeader({ episode, running, onRun, onViewScript, onApiKeyC
 
   // D-03: Button config per status
   const primaryButton = (() => {
-    if (running) return { label: "运行中...", disabled: true, mode: "" };
+    if (running) return { label: "取消", disabled: false, mode: "__cancel__" };
     switch (episode.status) {
       case "empty":
         return { label: "切分", disabled: false, mode: "chunk_only" };
@@ -90,9 +91,18 @@ export function EpisodeHeader({ episode, running, onRun, onViewScript, onApiKeyC
         {/* Primary action button */}
         <button
           type="button"
-          onClick={() => onRun(primaryButton.mode)}
+          onClick={() => {
+            if (primaryButton.mode === "__cancel__") {
+              onCancel?.();
+            } else {
+              onRun(primaryButton.mode);
+            }
+          }}
           disabled={primaryButton.disabled}
           className={`px-3 py-1.5 text-sm rounded ${
+            primaryButton.mode === "__cancel__"
+              ? "bg-red-600 text-white hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700"
+              :
             primaryButton.disabled
               ? "bg-neutral-200 dark:bg-neutral-700 text-neutral-400 cursor-not-allowed"
               : "bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-200"
