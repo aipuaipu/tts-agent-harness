@@ -3,7 +3,6 @@
 import { useEffect, useCallback, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { Episode, StageName } from "@/lib/types";
 import { useHarnessStore } from "@/lib/store";
 import { useEpisodes, useEpisode, useEpisodeLogs, getAudioUrl } from "@/lib/hooks";
@@ -109,14 +108,6 @@ export default function Page() {
       {/* Header */}
       <header className="h-12 border-b border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 flex items-center px-4 shrink-0">
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => store.setSidebarCollapsed(!sidebarCollapsed)}
-            className="w-6 h-6 rounded flex items-center justify-center text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-            title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
-          >
-            {sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
-          </button>
           <div className="w-6 h-6 rounded bg-neutral-900 dark:bg-white flex items-center justify-center text-white dark:text-neutral-900 text-xs font-bold">T</div>
           <h1 className="font-semibold text-sm">TTS Harness</h1>
           <span className="text-xs text-neutral-400 dark:text-neutral-500 ml-1">v2</span>
@@ -130,18 +121,18 @@ export default function Page() {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar */}
-        {!sidebarCollapsed && (
-          <EpisodeSidebar
-            episodes={episodes ?? []}
-            selectedId={selectedId}
-            onSelect={store.selectEpisode}
-            onNewEpisode={() => setNewEpOpen(true)}
-            error={episodesError ?? null}
-            onDelete={async (id) => { if (confirm(`确认删除 ${id}？`)) { try { await store.deleteEpisode(id); await mutateList(); } catch (e) { toast.error("删除失败", { description: (e as Error).message }); } } }}
-            onDuplicate={async (id) => { const newId = prompt(`复制 ${id} 到新 ID:`, `${id}-copy`); if (newId?.trim()) { try { await store.duplicateEpisode(id, newId.trim()); await mutateList(); } catch (e) { toast.error("复制失败", { description: (e as Error).message }); } } }}
-            onArchive={async (id) => { if (confirm(`归档 ${id}？`)) { try { await store.archiveEpisode(id); await mutateList(); } catch (e) { toast.error("归档失败", { description: (e as Error).message }); } } }}
-          />
-        )}
+        <EpisodeSidebar
+          episodes={episodes ?? []}
+          selectedId={selectedId}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => store.setSidebarCollapsed(!sidebarCollapsed)}
+          onSelect={store.selectEpisode}
+          onNewEpisode={() => setNewEpOpen(true)}
+          error={episodesError ?? null}
+          onDelete={async (id) => { if (confirm(`确认删除 ${id}？`)) { try { await store.deleteEpisode(id); await mutateList(); } catch (e) { toast.error("删除失败", { description: (e as Error).message }); } } }}
+          onDuplicate={async (id) => { const newId = prompt(`复制 ${id} 到新 ID:`, `${id}-copy`); if (newId?.trim()) { try { await store.duplicateEpisode(id, newId.trim()); await mutateList(); } catch (e) { toast.error("复制失败", { description: (e as Error).message }); } } }}
+          onArchive={async (id) => { if (confirm(`归档 ${id}？`)) { try { await store.archiveEpisode(id); await mutateList(); } catch (e) { toast.error("归档失败", { description: (e as Error).message }); } } }}
+        />
 
         {/* Main content */}
         <main className="flex-1 min-w-0 flex flex-col overflow-hidden bg-neutral-50 dark:bg-neutral-900">

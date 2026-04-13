@@ -1,11 +1,14 @@
 "use client";
 
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { EpisodeSummary, EpisodeStatus } from "@/lib/types";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 
 interface Props {
   episodes: EpisodeSummary[];
   selectedId: string | null;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
   onSelect: (id: string) => void;
   onNewEpisode: () => void;
   onDelete?: (id: string) => void;
@@ -23,13 +26,39 @@ const STATUS_DOT: Record<EpisodeStatus, string> = {
 };
 
 export function EpisodeSidebar({
-  episodes, selectedId, onSelect, onNewEpisode, onDelete, onDuplicate, onArchive, error,
+  episodes, selectedId, collapsed, onToggleCollapse, onSelect, onNewEpisode, onDelete, onDuplicate, onArchive, error,
 }: Props) {
+  // Collapsed: narrow strip with expand button
+  if (collapsed) {
+    return (
+      <aside className="w-10 border-r border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 flex flex-col items-center shrink-0 py-2 gap-2">
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className="w-7 h-7 rounded flex items-center justify-center text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          title="展开侧边栏"
+        >
+          <PanelLeftOpen size={14} />
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside className="w-56 border-r border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 flex flex-col shrink-0">
       <div className="px-3 py-3 flex items-center justify-between border-b border-neutral-100 dark:border-neutral-700">
         <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Episodes</span>
-        <button type="button" onClick={onNewEpisode} className="text-xs px-2 py-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-400">+ New</button>
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={onNewEpisode} className="text-xs px-2 py-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-400">+ New</button>
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            className="w-6 h-6 rounded flex items-center justify-center text-neutral-400 dark:text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            title="折叠侧边栏"
+          >
+            <PanelLeftClose size={12} />
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto p-1.5">
         {error ? (
