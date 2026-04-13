@@ -20,6 +20,9 @@
 | ADR-001 | [adr/001-server-stack](adr/001-server-stack.md) | 服务端技术选型（Prefect + FastAPI + Postgres + MinIO） |
 | ADR-002 | [adr/002-rewrite-plan](adr/002-rewrite-plan.md) | Agent Teams 重写实施计划 |
 | 004 | [frontend-architecture](004-frontend-architecture.md) | 前端分层设计（Zustand + shadcn + openapi-fetch） |
+| 015 | [error-handling-design](015-error-handling-design.md) | 错误处理设计 |
+| 016 | [dev-mode-resilience](016-dev-mode-resilience.md) | 开发模式容错设计 |
+| 017 | [llm-agent-design](017-llm-agent-design.md) | LLM Agent 设计 |
 
 ## 测试
 
@@ -27,12 +30,7 @@
 |---|---|---|
 | 006 | [e2e-plan](006-e2e-plan.md) | 全流程 E2E 测试计划（Playwright） |
 | 007 | [e2e-test-cases](007-e2e-test-cases.md) | 细粒度测试用例（15 个 TC） |
-
-## 迁移记录
-
-| # | 文档 | 内容 |
-|---|---|---|
-| 005 | [frontend-migration](005-frontend-migration.md) | 前端组件迁移清单和问题记录 |
+| 010 | [repair-test-design](010-repair-test-design.md) | 修复流程测试设计 |
 
 ## 未来方向
 
@@ -45,3 +43,4 @@
 | 目录 | 内容 |
 |---|---|
 | [worklogs/](worklogs/) | Agent A1-A11 的工作日志 + W1-W3 wave gate 报告 |
+| [_archive/](_archive/) | 已完成的设计文档归档（005, 009, 011-014） |
