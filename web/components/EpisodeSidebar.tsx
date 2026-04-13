@@ -56,10 +56,10 @@ export function EpisodeSidebar({
                     <button type="button" className={`w-5 h-5 text-[11px] rounded flex items-center justify-center shrink-0 ${sel ? "hover:bg-white/20 text-neutral-300 dark:hover:bg-black/20 dark:text-neutral-600" : "hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-400 dark:text-neutral-500"}`}>⋯</button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    {onDuplicate && <DropdownMenuItem onClick={() => onDuplicate(ep.id)}>Duplicate</DropdownMenuItem>}
-                    {onArchive && <DropdownMenuItem onClick={() => onArchive(ep.id)}>Archive</DropdownMenuItem>}
+                    {onDuplicate && <DropdownMenuItem onClick={() => onDuplicate(ep.id)}>复制</DropdownMenuItem>}
+                    {onArchive && <DropdownMenuItem onClick={() => onArchive(ep.id)}>归档</DropdownMenuItem>}
                     {(onDuplicate || onArchive) && onDelete && <DropdownMenuSeparator />}
-                    {onDelete && <DropdownMenuItem destructive onClick={() => onDelete(ep.id)}>Delete</DropdownMenuItem>}
+                    {onDelete && <DropdownMenuItem destructive onClick={() => onDelete(ep.id)}>删除</DropdownMenuItem>}
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
