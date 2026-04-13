@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -147,7 +148,7 @@ function ConfigForm({
       await onUpdateConfig(episodeId, formToConfig(form));
       onSaved();
     } catch (e) {
-      alert(`Save failed: ${(e as Error).message}`);
+      toast.error("保存失败", { description: (e as Error).message });
     } finally { setSaving(false); }
   }, [episodeId, form, onSaved, onUpdateConfig]);
 

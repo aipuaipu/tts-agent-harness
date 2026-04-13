@@ -7,6 +7,8 @@ import type { Episode, StageName } from "@/lib/types";
 import { useHarnessStore } from "@/lib/store";
 import { useEpisodes, useEpisode, useEpisodeLogs, getAudioUrl } from "@/lib/hooks";
 import { getApiUrl } from "@/lib/api-client";
+import { useConfirm } from "@/hooks/useConfirm";
+import { usePrompt } from "@/hooks/usePrompt";
 
 import { EpisodeSidebar } from "@/components/EpisodeSidebar";
 import { EpisodeHeader } from "@/components/EpisodeHeader";
@@ -99,6 +101,10 @@ export default function Page() {
     return () => mq.removeEventListener("change", handler);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // --- Confirm/Prompt dialog hooks ---
+  const [confirmAction, ConfirmDialog] = useConfirm();
+  const [promptAction, PromptDialog] = usePrompt();
+
   // --- NewEpisode dialog state (local — only used here) ---
   const [newEpOpen, setNewEpOpen] = useState(false);
   const [scriptPreviewOpen, setScriptPreviewOpen] = useState(false);
@@ -131,9 +137,9 @@ export default function Page() {
           onSelect={store.selectEpisode}
           onNewEpisode={() => setNewEpOpen(true)}
           error={episodesError ?? null}
-          onDelete={async (id) => { if (confirm(`确认删除 ${id}？`)) { try { await store.deleteEpisode(id); await mutateList(); } catch (e) { toast.error("删除失败", { description: (e as Error).message }); } } }}
-          onDuplicate={async (id) => { const newId = prompt(`复制 ${id} 到新 ID:`, `${id}-copy`); if (newId?.trim()) { try { await store.duplicateEpisode(id, newId.trim()); await mutateList(); } catch (e) { toast.error("复制失败", { description: (e as Error).message }); } } }}
-          onArchive={async (id) => { if (confirm(`归档 ${id}？`)) { try { await store.archiveEpisode(id); await mutateList(); } catch (e) { toast.error("归档失败", { description: (e as Error).message }); } } }}
+          onDelete={async (id) => { const ok = await confirmAction(`确认删除 ${id}？`, { destructive: true }); if (ok) { try { await store.deleteEpisode(id); await mutateList(); } catch (e) { toast.error("删除失败", { description: (e as Error).message }); } } }}
+          onDuplicate={async (id) => { const newId = await promptAction(`复制 ${id} 到新 ID:`, { defaultValue: `${id}-copy` }); if (newId) { try { await store.duplicateEpisode(id, newId); await mutateList(); } catch (e) { toast.error("复制失败", { description: (e as Error).message }); } } }}
+          onArchive={async (id) => { const ok = await confirmAction(`归档 ${id}？`); if (ok) { try { await store.archiveEpisode(id); await mutateList(); } catch (e) { toast.error("归档失败", { description: (e as Error).message }); } } }}
         />
 
         {/* Main content */}
@@ -173,7 +179,9 @@ export default function Page() {
                   chunks={episode.chunks}
                   onStageRetry={async (stage: StageName) => {
                     const failed = episode.chunks.filter(c => c.stageRuns.find(sr => sr.stage === stage)?.status === "failed");
-                    if (!failed.length || !confirm(`重跑 ${failed.length} 个失败的 ${stage.toUpperCase()}？`)) return;
+                    if (!failed.length) return;
+                    const ok = await confirmAction(`重跑 ${failed.length} 个失败的 ${stage.toUpperCase()}？`);
+                    if (!ok) return;
                     for (const c of failed) await store.retryChunk(episode.id, c.id, stage, true);
                     await mutateDetail();
                   }}
@@ -258,6 +266,10 @@ export default function Page() {
           onClose={() => setScriptPreviewOpen(false)}
         />
       )}
+
+      {/* Confirm / Prompt dialogs */}
+      {ConfirmDialog}
+      {PromptDialog}
 
       {/* Stage Log Drawer */}
       {store.drawerOpen && store.selectedId && episode && <DrawerWithContext
