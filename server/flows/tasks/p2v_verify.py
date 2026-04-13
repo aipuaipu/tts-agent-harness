@@ -11,8 +11,8 @@ Per-call lifecycle
 3. Download the take WAV from MinIO.
 4. POST multipart (file=WAV, language=episode language) to whisperx-svc.
 5. Upload transcript JSON to MinIO under ``chunk_transcript_key``.
-6. Run 5-dimensional scoring via ``p2v_scoring.evaluate()``:
-   duration_ratio, silence, phonetic_distance, char_ratio, asr_confidence.
+6. Run 2-dimensional scoring via ``p2v_scoring.evaluate()``:
+   duration_ratio, silence (phonetic/char/asr disabled, always 1.0).
 7. If weighted_score >= 0.7 -> pass:
    - ``chunks.status`` -> ``verified``
    - ``verify_finished`` event with scores + diagnosis
@@ -316,7 +316,7 @@ async def run_p2v_verify(
         )
         raise
 
-    # 6. Quality gate: 5-dimensional scoring via p2v_scoring.evaluate().
+    # 6. Quality gate: 2-dimensional scoring via p2v_scoring.evaluate().
     transcribed_text = _extract_transcribed_text(transcript_data)
     words_raw = transcript_data.get("transcript", [])
     char_count = len(re.sub(r"\s+", "", original_text))

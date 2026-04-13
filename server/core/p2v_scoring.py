@@ -1,14 +1,16 @@
-"""P2v 多维评估引擎 -- 确定性信号为主，模型信号为辅
+"""P2v 多维评估引擎 -- 仅保留确定性信号
 
 纯函数模块，不依赖 DB/MinIO/Prefect。所有评估函数接收已提取的数据，
 返回 0-1 范围的分数（1.0 = 最优）。
 
-五个维度：
+有效维度（2 维）：
   1. duration_ratio  — 时长/字数比合理性
   2. silence         — 静音异常检测
-  3. phonetic_distance — 音素距离（pypinyin + levenshtein）
-  4. char_ratio      — 字符比
-  5. asr_confidence  — ASR 词级置信度均值
+
+已禁用维度（始终 1.0，向后兼容）：
+  3. phonetic_distance — 中英混合 ASR 误差大，不参与判定
+  4. char_ratio      — 同上
+  5. asr_confidence  — 同上
 """
 
 from __future__ import annotations
@@ -38,10 +40,8 @@ class VerifyScores:
 @dataclass
 class Diagnosis:
     verdict: str               # "pass" | "fail"
-    type: str | None           # "word_mismatch" | "word_missing" | "speed_anomaly" | None
-    missing: list[str]         # 原文有但转写没有的词
-    extra: list[str]           # 转写有但原文没有的词
-    low_confidence_words: list[str]  # score < 0.5 的词
+    type: str | None           # "speed_anomaly" | "silence_anomaly" | None
+    detail: str                # 人可读描述
 
 
 # ---------------------------------------------------------------------------
@@ -49,11 +49,11 @@ class Diagnosis:
 # ---------------------------------------------------------------------------
 
 WEIGHTS = {
-    "duration_ratio": 0.25,
-    "silence": 0.20,
-    "phonetic_distance": 0.25,
-    "char_ratio": 0.15,
-    "asr_confidence": 0.15,
+    "duration_ratio": 0.50,
+    "silence": 0.50,
+    "phonetic_distance": 0.0,
+    "char_ratio": 0.0,
+    "asr_confidence": 0.0,
 }
 
 PASS_THRESHOLD = 0.70
@@ -328,42 +328,48 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _build_diagnosis(
-    original: str,
-    transcribed: str,
-    words: list[dict],
+    char_count: int,
+    duration_s: float,
     scores: VerifyScores,
+    silence_segments: list[dict],
 ) -> Diagnosis:
-    """Analyze differences to produce a diagnosis."""
-    orig_tokens = set(_tokenize(original))
-    trans_tokens = set(_tokenize(transcribed))
-
-    missing = sorted(orig_tokens - trans_tokens)
-    extra = sorted(trans_tokens - orig_tokens)
-
-    low_conf = []
-    for w in words:
-        s = w.get("score")
-        word_text = w.get("word", "")
-        if s is not None and s < 0.5 and word_text.strip():
-            low_conf.append(word_text.strip())
-
-    # Determine type
-    diag_type: str | None = None
-    if scores.duration_ratio < 0.5:
-        diag_type = "speed_anomaly"
-    elif missing:
-        diag_type = "word_missing"
-    elif extra or low_conf:
-        diag_type = "word_mismatch"
-
+    """Analyze duration and silence to produce a diagnosis."""
     verdict = "pass" if scores.weighted_score >= PASS_THRESHOLD else "fail"
+
+    # Determine type and detail
+    diag_type: str | None = None
+    detail_parts: list[str] = []
+
+    if duration_s > 0 and char_count > 0:
+        chars_per_sec = char_count / duration_s
+        detail_parts.append(f"语速: {chars_per_sec:.1f}字/秒 (正常范围{_SPEED_MIN:.0f}-{_SPEED_MAX:.0f})")
+        if scores.duration_ratio < 0.5:
+            diag_type = "speed_anomaly"
+
+    if silence_segments:
+        internal_long = [
+            s for s in silence_segments
+            if s.get("start", 0.0) >= 0.1
+            and s.get("end", 0.0) <= duration_s - 0.1
+            and s.get("duration", 0.0) > 1.0
+        ]
+        if internal_long:
+            max_dur = max(s.get("duration", 0.0) for s in internal_long)
+            detail_parts.append(f"内部静音: {len(internal_long)}段, 最长{max_dur:.1f}s")
+            if diag_type is None and scores.silence < 0.7:
+                diag_type = "silence_anomaly"
+
+        total_silence = sum(s.get("duration", 0.0) for s in silence_segments)
+        if duration_s > 0:
+            ratio_pct = total_silence / duration_s * 100
+            detail_parts.append(f"静音占比: {ratio_pct:.0f}%")
+
+    detail = "; ".join(detail_parts) if detail_parts else "正常"
 
     return Diagnosis(
         verdict=verdict,
         type=diag_type,
-        missing=missing,
-        extra=extra,
-        low_confidence_words=low_conf,
+        detail=detail,
     )
 
 
@@ -380,34 +386,36 @@ def evaluate(
     char_count: int,
     silence_segments: list[dict],
 ) -> tuple[VerifyScores, Diagnosis]:
-    """Run all 5 scoring dimensions and produce a weighted verdict.
+    """Run 2 effective scoring dimensions and produce a weighted verdict.
+
+    phonetic_distance, char_ratio, asr_confidence are fixed at 1.0
+    (disabled — unreliable for mixed CN/EN content).
 
     Returns (VerifyScores, Diagnosis) tuple.
     """
     s_duration = score_duration_ratio(char_count, duration_s)
     s_silence = score_silence(duration_s, silence_segments)
-    s_phonetic = score_phonetic_distance(original_text, transcribed_text)
-    s_char = score_char_ratio(original_text, transcribed_text)
-    s_asr = score_asr_confidence(words)
+
+    # Disabled dimensions — always 1.0 for backward compat
+    s_phonetic = 1.0
+    s_char = 1.0
+    s_asr = 1.0
 
     weighted = (
         s_duration * WEIGHTS["duration_ratio"]
         + s_silence * WEIGHTS["silence"]
-        + s_phonetic * WEIGHTS["phonetic_distance"]
-        + s_char * WEIGHTS["char_ratio"]
-        + s_asr * WEIGHTS["asr_confidence"]
     )
 
     scores = VerifyScores(
         duration_ratio=round(s_duration, 4),
         silence=round(s_silence, 4),
-        phonetic_distance=round(s_phonetic, 4),
-        char_ratio=round(s_char, 4),
-        asr_confidence=round(s_asr, 4),
+        phonetic_distance=s_phonetic,
+        char_ratio=s_char,
+        asr_confidence=s_asr,
         weighted_score=round(weighted, 4),
     )
 
-    diagnosis = _build_diagnosis(original_text, transcribed_text, words, scores)
+    diagnosis = _build_diagnosis(char_count, duration_s, scores, silence_segments)
 
     return scores, diagnosis
 

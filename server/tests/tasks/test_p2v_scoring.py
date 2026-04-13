@@ -1,7 +1,10 @@
-"""Unit tests for the P2v multi-dimensional scoring engine.
+"""Unit tests for the P2v scoring engine.
 
-12 test cases covering all 5 scoring dimensions + integrated evaluate().
+12 test cases covering scoring dimensions + integrated evaluate().
 All tests are pure-function, no I/O or DB needed.
+
+Note: phonetic_distance, char_ratio, asr_confidence are still tested as
+standalone functions but are no longer used by evaluate() (always 1.0).
 """
 
 from __future__ import annotations
@@ -192,4 +195,5 @@ def test_evaluate_fail():
     )
     assert scores.weighted_score < PASS_THRESHOLD
     assert diag.verdict == "fail"
-    assert len(diag.missing) > 0  # many original words missing
+    assert diag.type is not None  # speed_anomaly or silence_anomaly
+    assert diag.detail  # non-empty human-readable detail
