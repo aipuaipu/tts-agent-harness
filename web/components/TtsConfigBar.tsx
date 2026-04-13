@@ -177,7 +177,7 @@ function ConfigForm({
           <input type="number" step="0.1" min="0" max="1" value={form.top_p} onChange={(e) => set("top_p", e.target.value)} className={inputClass} />
         </div>
         <div>
-          <label className="text-xs text-neutral-600 flex items-center gap-1 mb-1">Speed <HelpTip>语速倍率（prosody.speed）。1.0 = 正常速度，&gt;1 加速，&lt;1 减速。范围 0.5-2.0，默认 1.0。</HelpTip></label>
+          <label className="text-xs text-neutral-600 flex items-center gap-1 mb-1">Speed <HelpTip>语速倍率（prosody.speed）。1.0 = 正常速度，&gt;1 加速，&lt;1 减速。范围 0.5-2.0，默认 1.25。</HelpTip></label>
           <input type="number" step="0.05" min="0.5" max="2" value={form.speed} onChange={(e) => set("speed", e.target.value)} className={inputClass} />
         </div>
         <div>
