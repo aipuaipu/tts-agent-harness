@@ -185,6 +185,7 @@ class EpisodeView(_ORM):
     status: EpisodeStatus
     script_uri: str
     config: dict[str, Any]
+    locked: bool = False
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
@@ -199,6 +200,7 @@ class EpisodeSummary(_CamelBase):
     id: str
     title: str
     status: EpisodeStatus
+    locked: bool = False
     chunk_count: int
     done_count: int
     failed_count: int

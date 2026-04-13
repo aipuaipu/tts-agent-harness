@@ -95,6 +95,24 @@ class EpisodeRepo:
         res = await self.session.execute(stmt)
         return (res.rowcount or 0) > 0
 
+    async def set_locked(self, episode_id: str, locked: bool) -> bool:
+        stmt = (
+            update(Episode)
+            .where(Episode.id == episode_id)
+            .values(locked=locked, updated_at=datetime.now(timezone.utc))
+        )
+        res = await self.session.execute(stmt)
+        return (res.rowcount or 0) > 0
+
+    async def list_unlocked_oldest_first(self) -> Sequence[Episode]:
+        stmt = (
+            select(Episode)
+            .where(Episode.locked.is_(False), Episode.archived_at.is_(None))
+            .order_by(Episode.updated_at.asc())
+        )
+        res = await self.session.execute(stmt)
+        return res.scalars().all()
+
 
 # ---------------------------------------------------------------------------
 # Chunks

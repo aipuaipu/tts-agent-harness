@@ -82,6 +82,10 @@ class DeleteResponse(_CamelBase):
     deleted: bool
 
 
+class LockResponse(_CamelBase):
+    locked: bool
+
+
 class DuplicateRequest(_CamelBase):
     new_id: str
 
@@ -138,6 +142,7 @@ async def list_episodes(
                 id=ep.id,
                 title=ep.title,
                 status=ep.status,
+                locked=ep.locked,
                 chunk_count=len(chunks),
                 done_count=done_count,
                 failed_count=failed_count,
@@ -296,6 +301,7 @@ async def get_episode(
         "status": ep.status,
         "script_uri": ep.script_uri,
         "config": ep.config,
+        "locked": ep.locked,
         "created_at": ep.created_at,
         "updated_at": ep.updated_at,
         "archived_at": ep.archived_at,
@@ -368,6 +374,11 @@ async def delete_episode(
     session: AsyncSession = Depends(get_session),
 ) -> DeleteResponse:
     repo = EpisodeRepo(session)
+    ep = await repo.get(episode_id)
+    if ep is None:
+        raise DomainError("not_found", f"episode '{episode_id}' not found")
+    if ep.locked:
+        raise DomainError("invalid_state", f"episode '{episode_id}' is locked")
     deleted = await repo.delete(episode_id)
     if not deleted:
         raise DomainError("not_found", f"episode '{episode_id}' not found")
@@ -407,6 +418,9 @@ async def run_episode(
     ep = await repo.get(episode_id)
     if ep is None:
         raise DomainError("not_found", f"episode '{episode_id}' not found")
+
+    if ep.locked:
+        raise DomainError("invalid_state", f"episode '{episode_id}' is locked")
 
     if ep.status == "running":
         raise DomainError("invalid_state", "episode is already running")
@@ -732,6 +746,14 @@ async def edit_chunk(
     subtitle_text: str | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> EditResponse:
+    # Check locked
+    ep_repo = EpisodeRepo(session)
+    ep = await ep_repo.get(episode_id)
+    if ep is None:
+        raise DomainError("not_found", f"episode '{episode_id}' not found")
+    if ep.locked:
+        raise DomainError("invalid_state", f"episode '{episode_id}' is locked")
+
     chunk_repo = ChunkRepo(session)
 
     # Verify chunk exists and belongs to the episode
@@ -1060,6 +1082,39 @@ async def archive_episode(
     # Re-fetch to get the archived_at timestamp
     ep = await repo.get(episode_id)
     return ArchiveResponse(archived_at=ep.archived_at)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# POST /episodes/{id}/lock | /episodes/{id}/unlock
+# ---------------------------------------------------------------------------
+
+
+@router.post("/episodes/{episode_id}/lock", response_model=LockResponse)
+async def lock_episode(
+    episode_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> LockResponse:
+    repo = EpisodeRepo(session)
+    ep = await repo.get(episode_id)
+    if ep is None:
+        raise DomainError("not_found", f"episode '{episode_id}' not found")
+    await repo.set_locked(episode_id, True)
+    await session.commit()
+    return LockResponse(locked=True)
+
+
+@router.post("/episodes/{episode_id}/unlock", response_model=LockResponse)
+async def unlock_episode(
+    episode_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> LockResponse:
+    repo = EpisodeRepo(session)
+    ep = await repo.get(episode_id)
+    if ep is None:
+        raise DomainError("not_found", f"episode '{episode_id}' not found")
+    await repo.set_locked(episode_id, False)
+    await session.commit()
+    return LockResponse(locked=False)
 
 
 # ---------------------------------------------------------------------------
