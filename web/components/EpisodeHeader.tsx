@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useTheme } from "@/components/Providers";
 import { Lock, Sun, Moon, KeyRound } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import type { Episode, EpisodeStatus } from "@/lib/types";
 import { getApiUrl } from "@/lib/api-client";
+import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
 interface Props {
   episode: Episode;
@@ -33,6 +35,22 @@ export function EpisodeHeader({ episode, running, onRun, onCancel, onViewScript,
   const badge = STATUS_BADGE[episode.status] ?? STATUS_BADGE.ready;
   const { resolvedTheme, setTheme } = useTheme();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [regenConfirmOpen, setRegenConfirmOpen] = useState(false);
+
+  const handleScriptDownload = useCallback(async () => {
+    try {
+      const res = await fetch(`${getApiUrl()}/episodes/${episode.id}/script`);
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${episode.id}-script.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      toast.error("下载失败", { description: (e as Error).message });
+    }
+  }, [episode.id]);
 
   const totalDurationS = episode.chunks.reduce((sum, c) => {
     const selectedTake = c.takes.find((t) => t.id === c.selectedTakeId);
@@ -176,13 +194,8 @@ export function EpisodeHeader({ episode, running, onRun, onCancel, onViewScript,
             <DropdownMenuItem onClick={() => onViewScript?.()}>
               查看脚本
             </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <a
-                href={`${getApiUrl()}/episodes/${episode.id}/script`}
-                download={`${episode.id}-script.json`}
-              >
-                下载脚本 (.json)
-              </a>
+            <DropdownMenuItem onClick={handleScriptDownload}>
+              下载脚本 (.json)
             </DropdownMenuItem>
             {episode.status === "done" && (
               <DropdownMenuItem asChild>
@@ -207,11 +220,7 @@ export function EpisodeHeader({ episode, running, onRun, onCancel, onViewScript,
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   destructive
-                  onClick={() => {
-                    if (confirm("确认重新生成？\n会清空所有已有产物重新开始。")) {
-                      onRun("regenerate");
-                    }
-                  }}
+                  onClick={() => setRegenConfirmOpen(true)}
                 >
                   重新生成（清空重来）
                 </DropdownMenuItem>
@@ -221,6 +230,32 @@ export function EpisodeHeader({ episode, running, onRun, onCancel, onViewScript,
         </DropdownMenu>
         </>
         )}
+
+        {/* Regenerate confirm dialog */}
+        <Dialog open={regenConfirmOpen} onOpenChange={setRegenConfirmOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>确认重新生成</DialogTitle>
+              <DialogDescription>会清空所有已有产物重新开始，此操作不可撤销。</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <button
+                type="button"
+                onClick={() => setRegenConfirmOpen(false)}
+                className="px-3 py-1.5 text-xs text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => { setRegenConfirmOpen(false); onRun("regenerate"); }}
+                className="px-4 py-1.5 text-xs rounded text-white bg-red-600 hover:bg-red-700"
+              >
+                确认重新生成
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
