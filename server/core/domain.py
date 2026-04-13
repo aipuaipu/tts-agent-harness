@@ -254,29 +254,6 @@ class P2vResult(_CamelBase):
     original_text: str = ""
 
 
-class RepairConfig(BaseModel):
-    """Configuration for the per-chunk repair loop (L0/L1/L2 strategy).
-
-    Defaults are conservative: 2 retries at L0 (plain retry), 2 at L1
-    (parameter tweaks), L2 (text rewrite) disabled until Phase 5.
-    """
-
-    max_attempts_per_level: list[int] = [2, 2, 1]  # L0, L1, L2
-    max_total_attempts: int = 5
-    level_0_enabled: bool = True
-    level_1_enabled: bool = True
-    level_2_enabled: bool = False  # Phase 5
-
-
-class RepairAction(BaseModel):
-    """Decision output from :func:`server.flows.repair.decide_repair`."""
-
-    action: Literal["retry", "stop"]
-    level: int = 0
-    params_override: dict | None = None  # L1 parameter tweak
-    text_override: str | None = None  # L2 text rewrite
-    reason: str = ""
-
 
 class P3Result(_CamelBase):
     chunk_id: str
@@ -379,8 +356,6 @@ __all__ = [
     "P1Result",
     "P2Result",
     "P2vResult",
-    "RepairConfig",
-    "RepairAction",
     "FishTTSParams",
     "P3Result",
     "P5Result",
