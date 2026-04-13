@@ -261,7 +261,7 @@ export const ChunkRow = memo(function ChunkRow({
             />
           </div>
         )}
-        {chunk.verifyScores && (
+        {chunk.verifyScores && chunk.verifyScores.weightedScore != null && (
           <div className="mt-1">
             <button
               type="button"
