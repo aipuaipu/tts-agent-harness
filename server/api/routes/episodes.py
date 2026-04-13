@@ -211,6 +211,13 @@ async def create_episode(
     )
 
     await session.commit()
+
+    # Trigger storage cleanup in background (best-effort)
+    import asyncio
+    from server.core.cleanup import cleanup_if_needed
+    from server.core.db import get_sessionmaker
+    asyncio.create_task(cleanup_if_needed(get_sessionmaker(), storage))
+
     return EpisodeView.model_validate(ep)
 
 

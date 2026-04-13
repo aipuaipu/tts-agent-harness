@@ -199,6 +199,30 @@ class MinIOStorage:
 
         await asyncio.to_thread(_del)
 
+    async def get_bucket_size_bytes(self) -> int:
+        """Return total size of all objects in the bucket (bytes)."""
+        await self.ensure_bucket()
+
+        def _sum() -> int:
+            total = 0
+            for obj in self._client.list_objects(self._bucket, recursive=True):
+                total += obj.size or 0
+            return total
+
+        return await asyncio.to_thread(_sum)
+
+    async def delete_prefix(self, prefix: str) -> int:
+        """Delete all objects under *prefix*. Returns count of deleted objects."""
+        await self.ensure_bucket()
+
+        def _del_prefix() -> int:
+            objects = list(self._client.list_objects(self._bucket, prefix=prefix, recursive=True))
+            for obj in objects:
+                self._client.remove_object(self._bucket, obj.object_name)
+            return len(objects)
+
+        return await asyncio.to_thread(_del_prefix)
+
 
 __all__ = [
     "MinIOSettings",
