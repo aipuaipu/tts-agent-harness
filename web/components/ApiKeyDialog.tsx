@@ -189,63 +189,69 @@ function KeySection({
   link: { href: string; label: string };
 }) {
   const testing = status === "testing";
+  const [expanded, setExpanded] = useState(false);
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <h3 className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{title}</h3>
-      <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-relaxed">{description}</p>
 
-      {configured && (
-        <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-          <span>已配置</span>
+      {configured ? (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-emerald-600 dark:text-emerald-400">已配置 ✓</span>
           <StatusBadge status={status} />
-        </div>
-      )}
-
-      <div className="space-y-1.5">
-        <label htmlFor={inputId} className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
-          {configured ? "替换 Key" : "输入 API Key"}
-        </label>
-        <div className="flex gap-2">
-          <input
-            id={inputId}
-            type="text"
-            value={value}
-            onChange={(e) => { onChange(e.target.value); }}
-            placeholder={placeholder}
-            autoComplete="off"
-            data-1p-ignore
-            data-lpignore="true"
-            data-form-type="other"
-            className="flex-1 px-3 py-2 text-sm rounded border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-400 dark:focus:ring-neutral-500"
-            onKeyDown={(e) => { if (e.key === "Enter" && value.trim() && !testing) onSave(); }}
-          />
           <button
             type="button"
-            onClick={onSave}
-            disabled={!value.trim() || testing}
-            className="px-3 py-2 text-sm bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded hover:bg-neutral-800 dark:hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => setExpanded(!expanded)}
+            className="ml-auto text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
           >
-            {testing ? "验证..." : "保存"}
+            {expanded ? "收起" : "替换"}
           </button>
-          {configured && (
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={testing}
+            className="text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 disabled:opacity-50"
+          >
+            清除
+          </button>
+        </div>
+      ) : (
+        <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-relaxed">{description}</p>
+      )}
+
+      {(!configured || expanded) && (
+        <div className="space-y-1.5">
+          <div className="flex gap-2">
+            <input
+              id={inputId}
+              type="text"
+              value={value}
+              onChange={(e) => { onChange(e.target.value); }}
+              placeholder={placeholder}
+              autoComplete="off"
+              data-1p-ignore
+              data-lpignore="true"
+              data-form-type="other"
+              className="flex-1 px-3 py-2 text-sm rounded border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-400 dark:focus:ring-neutral-500"
+              onKeyDown={(e) => { if (e.key === "Enter" && value.trim() && !testing) onSave(); }}
+            />
             <button
               type="button"
-              onClick={onClear}
-              disabled={testing}
-              className="px-3 py-2 text-sm rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+              onClick={onSave}
+              disabled={!value.trim() || testing}
+              className="px-3 py-2 text-sm bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded hover:bg-neutral-800 dark:hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              清除
+              {testing ? "验证..." : "保存"}
             </button>
+          </div>
+          {status === "fail" && (
+            <p className="text-xs text-red-600 dark:text-red-400">Key 无效，请检查后重试</p>
           )}
+          <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 dark:text-blue-400 hover:underline inline-block">
+            {link.label} &rarr;
+          </a>
         </div>
-        {!configured && status === "fail" && (
-          <p className="text-xs text-red-600 dark:text-red-400">Key 无效，请检查后重试</p>
-        )}
-      </div>
-
-      <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 dark:text-blue-400 hover:underline inline-block">
-        {link.label} &rarr;
-      </a>
+      )}
     </div>
   );
 }
