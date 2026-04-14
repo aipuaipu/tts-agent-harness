@@ -111,10 +111,8 @@ def _get_session_factory() -> async_sessionmaker:
     if _SESSION_FACTORY is not None:
         return _SESSION_FACTORY
     # Fallback: create from env (keeps standalone dev mode working)
-    url = os.getenv(
-        "DATABASE_URL",
-        "postgresql+asyncpg://harness:harness@localhost:55432/harness",
-    )
+    from server.core.db import _database_url
+    url = _database_url()
     return async_sessionmaker(create_async_engine(url, future=True), expire_on_commit=False)
 
 

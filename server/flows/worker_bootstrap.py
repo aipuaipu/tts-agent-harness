@@ -51,10 +51,8 @@ def bootstrap() -> None:
         log.debug("worker_bootstrap: already bootstrapped, skipping")
         return
 
-    database_url = _env(
-        "DATABASE_URL",
-        "postgresql+asyncpg://harness:harness@localhost:55432/harness",
-    )
+    from server.core.db import _database_url
+    database_url = _database_url()
     engine = create_async_engine(database_url, future=True, pool_pre_ping=True)
     _session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
