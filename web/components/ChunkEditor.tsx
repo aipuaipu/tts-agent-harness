@@ -168,11 +168,11 @@ export function ChunkEditor({
 
       {/* Actions */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-t border-neutral-100 dark:border-neutral-700 flex-wrap">
-        <button type="button" onClick={handleStage}
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={handleStage}
           className="text-[11px] font-medium px-2.5 py-1 bg-amber-500 text-white rounded hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-700">
           Stage Change
         </button>
-        <button type="button" onClick={onCancel}
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onCancel}
           className="text-[11px] px-2 py-1 rounded text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-700 dark:hover:text-neutral-300">
           Cancel
         </button>
