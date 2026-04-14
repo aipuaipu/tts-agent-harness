@@ -179,7 +179,6 @@ export default function Page() {
                   } catch (e) { toast.error("取消失败", { description: (e as Error).message }); }
                 }}
                 onViewScript={() => setScriptPreviewOpen(true)}
-                onApiKeyClick={() => setApiKeyOpen(true)}
                 failedCount={failedCount}
               />
               <TtsConfigBar
