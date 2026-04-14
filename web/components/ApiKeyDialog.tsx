@@ -130,7 +130,7 @@ export function ApiKeyDialog({ open, onClose }: Props) {
             title="Fish Audio API Key"
             description={<>用于 TTS 语音合成（P2 阶段）。<strong className="text-neutral-700 dark:text-neutral-300">必填</strong>，否则无法合成音频。</>}
             inputId="fish-api-key-input"
-            placeholder="15392bf4..."
+            placeholder="粘贴 API Key"
             value={fishKey}
             onChange={setFishKey}
             savedMask={fishSavedMask}
