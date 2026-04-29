@@ -32,6 +32,8 @@
 - 死代码清理（repair.py、RepairConfig、RepairAction）
 - 存储过期清理（按容量 + episode locked 保护）
 - 脚本预览（JSON 视图 + 下载）
+- 接入 Xiaomi MIMO TTS (直连官方服务端 API)
+- 拓展 JSON 外的 MD、TXT、文本复制等前端材料输入方式
 
 ---
 

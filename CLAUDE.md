@@ -2,7 +2,9 @@
 
 确定性视频脚本转语音加字幕生产工具。输入脚本 JSON，输出 per-shot WAV + 时间对齐字幕。
 
-**当前只支持**：Fish Audio TTS（S2-Pro）+ WhisperX（本地）。
+**当前支持**：
+- **TTS**: Fish Audio TTS（S2-Pro） / Xiaomi MiMo TTS (mimo-v2.5-tts)
+- **ASR**: WhisperX（本地） / Groq Whisper API（云端）
 
 ## 架构速查
 
@@ -83,8 +85,14 @@ cd web && npx playwright test
 - P5 自动 strip `[break]`/`[breath]`/`[long break]`/phoneme 控制标记后再生成字幕
 - P2 发送 `normalize: false`，让 S2-Pro 引擎原样处理文本
 
-## 脚本格式
+### 输入格式支持
 
+当前支持三种导入方式，在后台均会统一转为标准 JSON：
+1. **上传 `script.json`**（兼容旧流程）
+2. **上传 `.txt` / `.md` 文档**
+3. **前端 Web UI 直接粘贴文案或 Markdown**
+
+对于标准 JSON，格式要求如下：
 ```json
 {
   "title": "Episode Title",
