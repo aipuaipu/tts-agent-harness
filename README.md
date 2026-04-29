@@ -2,7 +2,7 @@
 
 当前版本：**[2026.04.29.15.08]** (详细更新日志见 [CHANGELOG.md](CHANGELOG.md))
 
-确定性视频脚本转语音加字幕生产工具。输入脚本 JSON，输出 per-shot WAV + 时间对齐字幕。
+确定性视频脚本转语音加字幕生产工具。输入脚本 JSON/TXT/MD 文档或者直接在 Web UI 中粘贴剪贴板文案，系统会自动智能分段，输出 per-shot WAV + 时间对齐字幕。
 
 **原项目在线 Demo**: https://hiveden-tts.fly.dev
 **新项目在线 Demo**: 待部署
