@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2026-04-29]
 
 ### Added
 - **Xiaomi MIMO TTS Support**: 直连官方服务端 API (`https://api.xiaomimimo.com/v1/chat/completions`)。
