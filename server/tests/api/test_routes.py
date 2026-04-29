@@ -47,6 +47,8 @@ def _override_get_storage() -> Any:
     """Return a mock storage that captures uploads."""
     storage = MagicMock()
     storage.upload_bytes = AsyncMock(return_value="s3://tts-harness/test/script.json")
+    storage.download_bytes = AsyncMock(return_value=b'{"title":"Test","segments":[]}')
+    storage.get_bucket_size_bytes = AsyncMock(return_value=0)
     storage.ensure_bucket = AsyncMock()
     return storage
 
@@ -165,6 +167,63 @@ class TestEpisodeCRUD:
         assert data["title"] == "My Episode"
         assert data["status"] == "empty"
 
+    async def test_create_episode_from_text_file(self, client: AsyncClient):
+        resp = await client.post(
+            "/episodes",
+            data={"id": "ep-text"},
+            files={"script": ("script.txt", io.BytesIO(b"First shot.\n\nSecond shot."), "text/plain")},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["id"] == "ep-text"
+        assert data["title"] == "ep-text"
+        assert data["metadata"]["script_source_format"] == "text"
+
+    async def test_create_episode_from_pasted_markdown(self, client: AsyncClient):
+        from server.api.main import app
+        from server.api.deps import get_storage
+
+        class MemoryStorage:
+            def __init__(self) -> None:
+                self.objects: dict[str, bytes] = {}
+
+            async def upload_bytes(self, key: str, data: bytes, content_type: str) -> str:
+                self.objects[key] = data
+                return f"s3://tts-harness/{key}"
+
+            async def download_bytes(self, key: str) -> bytes:
+                return self.objects[key]
+
+            async def ensure_bucket(self) -> None:
+                return None
+
+            async def get_bucket_size_bytes(self) -> int:
+                return 0
+
+        storage = MemoryStorage()
+        app.dependency_overrides[get_storage] = lambda: storage
+        try:
+            resp = await client.post(
+                "/episodes",
+                data={"id": "ep-md", "script_text": "# Imported Title\n\nParagraph one.\n\nParagraph two."},
+            )
+            assert resp.status_code == 201
+            data = resp.json()
+            assert data["title"] == "Imported Title"
+            assert data["metadata"]["script_source_format"] == "markdown"
+
+            script_resp = await client.get("/episodes/ep-md/script")
+            assert script_resp.status_code == 200
+            assert script_resp.json() == {
+                "title": "Imported Title",
+                "segments": [
+                    {"id": 1, "type": "content", "text": "Paragraph one."},
+                    {"id": 2, "type": "content", "text": "Paragraph two."},
+                ],
+            }
+        finally:
+            app.dependency_overrides[get_storage] = _override_get_storage
+
     async def test_create_duplicate_episode(self, client: AsyncClient):
         script = json.dumps({"title": "Dup", "segments": []})
         files = {"script": ("s.json", io.BytesIO(script.encode()), "application/json")}
@@ -182,6 +241,11 @@ class TestEpisodeCRUD:
             data={"id": "bad"},
             files={"script": ("s.json", io.BytesIO(b"not json"), "application/json")},
         )
+        assert resp.status_code == 422
+        assert resp.json()["error"] == "invalid_input"
+
+    async def test_create_requires_script_file_or_text(self, client: AsyncClient):
+        resp = await client.post("/episodes", data={"id": "missing"})
         assert resp.status_code == 422
         assert resp.json()["error"] == "invalid_input"
 

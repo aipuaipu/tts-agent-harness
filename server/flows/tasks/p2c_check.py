@@ -6,7 +6,7 @@ sending to the expensive ASR pipeline.
 Check rules (per-chunk):
   - WAV file exists in storage       (hard fail)
   - 0 < duration < 60s               (hard fail)
-  - sample rate == 44100Hz            (hard fail)
+  - sample rate in (44100Hz, 24000Hz) (hard fail)
   - mono (1 channel)                  (hard fail)
   - speech rate 2-12 chars/s          (warning, not fail)
 """
@@ -127,8 +127,8 @@ def validate_wav(
         errors.append(f"WAV duration {duration:.1f}s exceeds 60s limit")
 
     # Sample rate check
-    if sample_rate != 44100:
-        errors.append(f"sample rate {sample_rate} != 44100")
+    if sample_rate not in (44100, 24000):
+        errors.append(f"sample rate {sample_rate} not in (44100, 24000)")
 
     # Mono check
     if channels != 1:

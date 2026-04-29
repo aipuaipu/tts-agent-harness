@@ -45,7 +45,7 @@ from .domain import ChunkInput
 # The regex uses a character class; consecutive terminators (``?!``, ``。。``)
 # collapse into a single break because the re.split keeps the run as one
 # captured group.
-_SENT_TERMINATORS = "。？！?!"
+_SENT_TERMINATORS = "。？！?!\n"
 _SENT_SPLIT_RE = re.compile(rf"([^{_SENT_TERMINATORS}]*[{_SENT_TERMINATORS}]+)")
 
 

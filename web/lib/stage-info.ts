@@ -25,10 +25,10 @@ export const STAGE_INFO: Record<StageName, StageInfo> = {
   },
   p2: {
     title: "P2 · TTS 合成",
-    description: "调用 Fish Audio S2-Pro API，将 chunk 的 text_normalized 合成为 WAV 音频。参数从 episode.config 读取（temperature / top_p / speed / reference_id）。",
+    description: "调用当前 episode 选择的 TTS provider，将 chunk 的 text_normalized 合成为 WAV 音频。Fish 读取 model / temperature / top_p / reference_id；xiaomi_mimo 直连官方 chat/completions，读取 model / voice / style_prompt。",
     inputs: "chunk.textNormalized + episode.config",
     outputs: "WAV 音频（MinIO）+ take 记录（DB）",
-    failure: "Fish API 401（key 无效）/ 429（限流）/ 超时 / 空响应",
+    failure: "Provider 鉴权失败 / 限流 / 超时 / 空响应 / Xiaomi MiMo 返回缺失 audio.data",
   },
   p2c: {
     title: "P2c · 格式校验",

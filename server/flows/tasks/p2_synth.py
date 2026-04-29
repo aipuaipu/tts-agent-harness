@@ -1,6 +1,6 @@
-"""P2 — Fish Audio TTS synthesis, Prefect task.
+"""P2 — provider-backed TTS synthesis, Prefect task.
 
-Per ADR-001 §4.3 this task carries the ``fish-api`` concurrency tag so that
+Per ADR-001 §4.3 this task carries the ``tts-api`` concurrency tag so that
 a Prefect global concurrency limit governs all synthesis traffic, no
 matter how many worker replicas are running. Retry/backoff is also
 delegated to Prefect (``retries=3`` + explicit ``retry_delay_seconds``
@@ -10,7 +10,7 @@ Per-call lifecycle
 ------------------
 1. Load chunk + episode from DB. Validate preconditions.
 2. Write a ``stage_started`` event (fires pg_notify → SSE).
-3. Call :class:`FishTTSClient.synthesize` to get WAV bytes.
+3. Call the selected provider client to get WAV bytes.
 4. Compute WAV duration (wave module, pure stdlib).
 5. Upload bytes to MinIO under the canonical ``chunk_take_key``.
 6. In a single transaction:
@@ -26,11 +26,8 @@ Failure paths
 -------------
 - Chunk missing → ``DomainError("not_found")``, fatal.
 - Empty text_normalized → ``DomainError("invalid_input")``, fatal.
-- Fish auth error → :class:`FishAuthError`, fatal (Prefect sees fatal
-  but still retries; we rely on ADR §4.3 saying "credential issues are
-  escalated out-of-band" — at the flow layer A8 can map the exception to
-  a non-retryable state if needed).
-- Fish 429 / 5xx / network → let Prefect retry via ``retries=3``.
+- Provider auth error → fatal.
+- Provider 429 / 5xx / network → let Prefect retry via ``retries=3``.
 - MinIO upload failure → raise, no take row written.
 
 On any failure after ``stage_started`` the task writes a ``stage_failed``
@@ -51,20 +48,23 @@ from typing import Any, AsyncIterator, Awaitable, Callable
 from prefect import task
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from server.core.domain import DomainError, FishTTSParams, P2Result, TakeAppend
-from server.core.events import write_event
-from server.core.fish_client import (
-    FishAuthError,
-    FishClientError,
-    FishTTSClient,
-    build_params_from_env,
+from server.core.domain import (
+    DomainError,
+    FishTTSParams,
+    P2Result,
+    TakeAppend,
+    TTSProvider,
+    XiaomiMimoTTSParams,
 )
+from server.core.events import write_event
+from server.core.fish_client import FishClientError
 from server.core.repositories import ChunkRepo, TakeRepo
 from server.core.storage import MinIOStorage, chunk_take_key
+from server.core.tts_provider import build_tts_params_from_env
 
 log = logging.getLogger(__name__)
 
-# Text longer than this triggers a non-fatal warning (Fish may truncate).
+# Text longer than this triggers a non-fatal warning (providers may truncate).
 TEXT_LENGTH_WARN_THRESHOLD = 3000
 
 
@@ -80,14 +80,14 @@ AsyncSessionCtxManager = Any  # async context manager yielding AsyncSession
 
 _session_factory: _SessionFactory | None = None
 _storage: MinIOStorage | None = None
-_fish_client_factory: Callable[[], FishTTSClient] | None = None
+_tts_client_factory: Callable[[TTSProvider], Any] | None = None
 
 
 def configure_p2_dependencies(
     *,
     session_factory: _SessionFactory,
     storage: MinIOStorage,
-    fish_client_factory: Callable[[], FishTTSClient],
+    tts_client_factory: Callable[[TTSProvider], Any],
 ) -> None:
     """Inject process-wide dependencies for the p2_synth task.
 
@@ -95,19 +95,19 @@ def configure_p2_dependencies(
     fixture. Keeping state at module level avoids having to thread
     ``FastAPI.state``-style containers through Prefect's task signature.
     """
-    global _session_factory, _storage, _fish_client_factory
+    global _session_factory, _storage, _tts_client_factory
     _session_factory = session_factory
     _storage = storage
-    _fish_client_factory = fish_client_factory
+    _tts_client_factory = tts_client_factory
 
 
-def _require_deps() -> tuple[_SessionFactory, MinIOStorage, Callable[[], FishTTSClient]]:
-    if _session_factory is None or _storage is None or _fish_client_factory is None:
+def _require_deps() -> tuple[_SessionFactory, MinIOStorage, Callable[[TTSProvider], Any]]:
+    if _session_factory is None or _storage is None or _tts_client_factory is None:
         raise RuntimeError(
             "p2_synth dependencies not configured. "
             "Call configure_p2_dependencies(...) before running the task."
         )
-    return _session_factory, _storage, _fish_client_factory
+    return _session_factory, _storage, _tts_client_factory
 
 
 # ---------------------------------------------------------------------------
@@ -171,24 +171,26 @@ async def _session_scope(factory: _SessionFactory) -> AsyncIterator[AsyncSession
 
 async def run_p2_synth(
     chunk_id: str,
-    params: FishTTSParams | dict[str, Any] | None = None,
+    params: FishTTSParams | XiaomiMimoTTSParams | dict[str, Any] | None = None,
 ) -> P2Result:
     """Pure coroutine that executes the P2 pipeline step.
 
     The ``@task`` wrapper below simply forwards to this. Keeping the body
     as a plain coroutine means unit tests do not need a Prefect runtime.
     """
-    session_factory, storage, fish_factory = _require_deps()
+    session_factory, storage, tts_factory = _require_deps()
 
-    # Normalise params input.
     if params is None:
-        fish_params = build_params_from_env()
+        overrides = None
     elif isinstance(params, FishTTSParams):
-        fish_params = params
+        overrides = params.model_dump()
+    elif isinstance(params, XiaomiMimoTTSParams):
+        overrides = {"provider": "xiaomi_mimo", **params.model_dump()}
     else:
-        merged = build_params_from_env().model_dump()
-        merged.update(params)
-        fish_params = FishTTSParams(**merged)
+        overrides = params
+
+    provider, provider_params = build_tts_params_from_env(overrides)
+    serialized_params = {"provider": provider, **provider_params.model_dump()}
 
     # 1. Load chunk + validate.
     async with _session_scope(session_factory) as session:
@@ -216,7 +218,7 @@ async def run_p2_synth(
 
         if len(text) > TEXT_LENGTH_WARN_THRESHOLD:
             log.warning(
-                "chunk %s text_normalized length=%d exceeds %d; Fish may truncate",
+                "chunk %s text_normalized length=%d exceeds %d; TTS provider may truncate",
                 chunk_id,
                 len(text),
                 TEXT_LENGTH_WARN_THRESHOLD,
@@ -236,23 +238,22 @@ async def run_p2_synth(
         )
         await session.commit()
 
-    # 3. Fish call — outside DB transaction, runs under the fish-api
+    # 3. Provider call — outside DB transaction, runs under the tts-api
     #    concurrency limit via the Prefect task tag.
-    fish_client = fish_factory()
+    tts_client = tts_factory(provider)
     try:
-        wav_bytes = await fish_client.synthesize(text, fish_params)
+        wav_bytes = await tts_client.synthesize(text, provider_params)
     except Exception as exc:  # noqa: BLE001 - classify downstream
         await _emit_stage_failed(
             session_factory,
             episode_id=episode_id,
             chunk_id=chunk_id,
-            error=f"{type(exc).__name__}: {exc}",
+            error=f"{provider}:{type(exc).__name__}: {exc}",
         )
         raise
     finally:
-        # If we own the client, close it; otherwise the caller owns it.
         try:
-            await fish_client.aclose()
+            await tts_client.aclose()
         except Exception:  # pragma: no cover
             pass
 
@@ -261,9 +262,9 @@ async def run_p2_synth(
             session_factory,
             episode_id=episode_id,
             chunk_id=chunk_id,
-            error="fish returned empty bytes",
+            error=f"{provider} returned empty bytes",
         )
-        raise FishClientError("Fish returned zero-length audio")
+        raise FishClientError(f"{provider} returned zero-length audio")
 
     duration_s = _wav_duration_seconds(wav_bytes)
 
@@ -289,7 +290,7 @@ async def run_p2_synth(
                 chunk_id=chunk_id,
                 audio_uri=audio_uri,
                 duration_s=duration_s,
-                params=fish_params.model_dump(),
+                params=serialized_params,
             )
         )
         chunk_repo = ChunkRepo(session)
@@ -302,6 +303,7 @@ async def run_p2_synth(
             kind="stage_finished",
             payload={
                 "stage": "p2",
+                "provider": provider,
                 "take_id": take.id,
                 "audio_uri": audio_uri,
                 "duration_s": duration_s,
@@ -321,7 +323,7 @@ async def run_p2_synth(
         take_id=take_id,
         audio_uri=audio_uri,
         duration_s=duration_s,
-        params=fish_params.model_dump(),
+        params=serialized_params,
     )
 
 
@@ -359,7 +361,7 @@ async def _emit_stage_failed(
 
 @task(
     name="p2-synth",
-    tags=["fish-api"],
+    tags=["tts-api"],
     retries=3,
     retry_delay_seconds=[2, 8, 32],
 )
@@ -370,7 +372,7 @@ async def p2_synth(
     """Prefect-wrapped entry point. See :func:`run_p2_synth` for the body.
 
     The concurrency limit is enforced globally via
-    ``prefect concurrency-limit create fish-api <N>`` (ADR-001 §4.3) —
+    ``prefect concurrency-limit create tts-api <N>`` (ADR-001 §4.3) —
     worker startup must register this limit before any flow runs.
     """
     return await run_p2_synth(chunk_id, params)

@@ -41,8 +41,14 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from server.core.domain import ChunkInput, DomainError, EpisodeCreate, FishTTSParams
-from server.core.fish_client import FishAuthError, FishTTSClient
+from server.core.domain import (
+    ChunkInput,
+    DomainError,
+    EpisodeCreate,
+    FishTTSParams,
+    XiaomiMimoTTSParams,
+)
+from server.core.fish_client import FishAuthError
 from server.core.models import Base, Chunk, Event, Take
 from server.core.repositories import ChunkRepo, EpisodeRepo
 from server.core.storage import chunk_take_key
@@ -96,8 +102,8 @@ class FakeStorage:
         return self.s3_uri(key)
 
 
-class FakeFishClient:
-    """Drop-in for :class:`FishTTSClient` used in tests.
+class FakeSynthClient:
+    """Drop-in provider client used in tests.
 
     Supports pluggable ``response_factory`` and ``raise_exc`` so a single
     test can configure the behaviour it needs.
@@ -111,9 +117,9 @@ class FakeFishClient:
     ) -> None:
         self._wav = wav_bytes if wav_bytes is not None else _make_tiny_wav()
         self._raise_exc = raise_exc
-        self.calls: list[tuple[str, FishTTSParams]] = []
+        self.calls: list[tuple[str, Any]] = []
 
-    async def synthesize(self, text: str, params: FishTTSParams) -> bytes:
+    async def synthesize(self, text: str, params: Any) -> bytes:
         self.calls.append((text, params))
         if self._raise_exc is not None:
             raise self._raise_exc
@@ -179,8 +185,8 @@ def storage() -> FakeStorage:
 
 
 @pytest.fixture()
-def fake_fish() -> FakeFishClient:
-    return FakeFishClient()
+def fake_fish() -> FakeSynthClient:
+    return FakeSynthClient()
 
 
 @pytest.fixture(autouse=True)
@@ -196,19 +202,19 @@ def wire_p2_deps(seeded, storage, fake_fish, monkeypatch):
 
     holder = {"client": fake_fish}
 
-    def factory():
+    def factory(provider: str):
         return holder["client"]
 
     p2_module.configure_p2_dependencies(
         session_factory=seeded,
         storage=storage,  # type: ignore[arg-type]
-        fish_client_factory=factory,
+        tts_client_factory=factory,
     )
     yield
     # teardown: reset module globals.
     p2_module._session_factory = None
     p2_module._storage = None
-    p2_module._fish_client_factory = None
+    p2_module._tts_client_factory = None
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +257,7 @@ async def test_happy_path_transitions_chunk_and_writes_take(
     assert result.audio_uri.startswith("s3://tts-harness/")
     assert result.audio_uri.endswith(".wav")
     assert result.duration_s > 0
+    assert result.params["provider"] == "fish"
     assert result.params["model"] == "s2-pro"
 
     # Chunk state advanced.
@@ -281,6 +288,7 @@ async def test_happy_path_transitions_chunk_and_writes_take(
 
     finished = next(e for e in events if e.kind == "stage_finished")
     assert finished.payload["stage"] == "p2"
+    assert finished.payload["provider"] == "fish"
     assert finished.payload["take_id"] == result.take_id
 
     # Fish was called with the normalized text.
@@ -295,9 +303,9 @@ async def test_missing_chunk_raises_domain_error(seeded):
         await run_p2_synth("no-such-chunk")
     assert excinfo.value.code == "not_found"
 
-    # No events, no takes.
+    # The adapter emits a stage_failed event for observability, but no take.
     events = await _list_events(seeded)
-    assert events == []
+    assert [event.kind for event in events] == ["stage_failed"]
     takes = await _list_takes(seeded)
     assert takes == []
 
@@ -377,11 +385,27 @@ async def test_custom_params_dict_is_merged_into_call(seeded, fake_fish):
     assert result.params["reference_id"] == "voice-x"
 
 
-async def test_p2_synth_task_decorator_has_fish_api_tag_and_retries():
+async def test_xiaomi_mimo_params_are_passed_through(seeded, fake_fish):
+    result = await run_p2_synth(
+        CHUNK_ID,
+        {"provider": "xiaomi_mimo", "voice": "Chloe", "model": "mimo-v2.5-tts", "style_prompt": "Warm and upbeat."},
+    )
+    _, used_params = fake_fish.calls[-1]
+    assert isinstance(used_params, XiaomiMimoTTSParams)
+    assert used_params.voice == "Chloe"
+    assert used_params.model == "mimo-v2.5-tts"
+    assert used_params.style_prompt == "Warm and upbeat."
+    assert result.params["provider"] == "xiaomi_mimo"
+    assert result.params["voice"] == "Chloe"
+    assert result.params["model"] == "mimo-v2.5-tts"
+    assert result.params["style_prompt"] == "Warm and upbeat."
+
+
+async def test_p2_synth_task_decorator_has_tts_api_tag_and_retries():
     """Lock in ADR-001 §4.3 contract: tag + retries are not a drive-by change."""
     from server.flows.tasks.p2_synth import p2_synth
 
-    assert "fish-api" in p2_synth.tags
+    assert "tts-api" in p2_synth.tags
     assert p2_synth.retries == 3
     assert list(p2_synth.retry_delay_seconds) == [2, 8, 32]
     assert p2_synth.name == "p2-synth"

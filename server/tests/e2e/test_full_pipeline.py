@@ -105,7 +105,7 @@ def _wire_task_dependencies(storage: MinIOStorage) -> None:
     configure_p2_dependencies(
         session_factory=maker,
         storage=storage,
-        fish_client_factory=lambda: FakeFishClient(),
+        tts_client_factory=lambda provider: FakeFishClient(),
     )
 
     # P3 (kept for backward compat)
@@ -315,7 +315,7 @@ async def test_pipeline_p2_failure(storage: MinIOStorage, db_session: AsyncSessi
     configure_p2_dependencies(
         session_factory=maker,
         storage=storage,
-        fish_client_factory=lambda: FailingFishClient(),
+        tts_client_factory=lambda provider: FailingFishClient(),
     )
 
     await _create_episode_in_db(ep_id, "Failure Test", script_bytes, storage)

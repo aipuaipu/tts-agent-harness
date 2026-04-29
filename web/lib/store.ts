@@ -9,7 +9,7 @@
  */
 
 import { create } from "zustand";
-import type { ChunkEdit, EditBatch, StageName } from "./types";
+import type { ChunkEdit, CreateEpisodeInput, EditBatch, StageName } from "./types";
 import * as api from "./hooks";
 
 interface HarnessState {
@@ -51,7 +51,7 @@ interface HarnessState {
   runEpisode: (mode: string, chunkIds?: string[]) => Promise<void>;
   applyEdits: (episodeId: string) => Promise<void>;
   retryChunk: (epId: string, cid: string, stage: StageName, cascade: boolean) => Promise<void>;
-  createEpisode: (id: string, file: File) => Promise<void>;
+  createEpisode: (input: CreateEpisodeInput) => Promise<void>;
   deleteEpisode: (id: string) => Promise<void>;
   duplicateEpisode: (id: string, newId: string) => Promise<void>;
   archiveEpisode: (id: string) => Promise<void>;
@@ -157,8 +157,8 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
     await api.retryChunk(epId, cid, stage, cascade);
   },
 
-  createEpisode: async (id, file) => {
-    await api.createEpisode(id, file);
+  createEpisode: async (input) => {
+    await api.createEpisode(input);
   },
 
   deleteEpisode: async (id) => {

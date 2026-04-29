@@ -29,6 +29,7 @@ EpisodeStatus = Literal["empty", "ready", "running", "failed", "done"]
 ChunkStatus = Literal["pending", "synth_done", "verified", "needs_review", "failed"]
 StageName = Literal["p1", "p1c", "p2", "p2c", "p2v", "p5", "p6", "p6v"]
 StageStatus = Literal["pending", "running", "ok", "failed"]
+TTSProvider = Literal["fish", "xiaomi_mimo"]
 EventKind = Literal[
     "stage_started",
     "stage_finished",
@@ -245,6 +246,24 @@ class FishTTSParams(_CamelBase):
     chunk_length: int = 200
 
 
+class XiaomiMimoTTSParams(_CamelBase):
+    """Parameter surface for Xiaomi MiMo's official server-side TTS API.
+
+    Official docs show the TTS API is called via:
+      POST https://api.xiaomimimo.com/v1/chat/completions
+    with ``model + messages + audio``.
+    """
+
+    model: Literal[
+        "mimo-v2.5-tts",
+        "mimo-v2.5-tts-voiceclone",
+        "mimo-v2.5-tts-voicedesign",
+    ] = "mimo-v2.5-tts"
+    format: Literal["wav", "mp3", "pcm16"] = "wav"
+    voice: str = "mimo_default"
+    style_prompt: str | None = None
+
+
 class P2vResult(_CamelBase):
     """Result of the P2v verify task (ASR + quality check)."""
 
@@ -340,6 +359,7 @@ __all__ = [
     "ChunkStatus",
     "StageName",
     "StageStatus",
+    "TTSProvider",
     "EventKind",
     # errors
     "DomainError",
@@ -359,6 +379,7 @@ __all__ = [
     "P2Result",
     "P2vResult",
     "FishTTSParams",
+    "XiaomiMimoTTSParams",
     "P3Result",
     "P5Result",
     "WhisperXWord",

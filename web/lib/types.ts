@@ -111,6 +111,12 @@ export interface ChunkEdit {
 }
 export type EditBatch = Record<ChunkId, ChunkEdit>;
 
+export interface CreateEpisodeInput {
+  id: string;
+  file?: File;
+  scriptText?: string;
+}
+
 // ===== SSE Event =====
 export interface StageEvent {
   episodeId: string;

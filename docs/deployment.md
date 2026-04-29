@@ -37,6 +37,7 @@
 | `MINIO_BUCKET` | 是 | `hiveden-tts-storage` |
 | `MINIO_SECURE` | 是 | `true` |
 | `GROQ_API_KEY` | 否 | 服务端 ASR，不设则用户需自带 |
+| `COOKIE_SECRET` | 否 | Cookie 加密密钥，不设则每次重启自动生成（会导致用户保存的 Key 失效） |
 
 **不设 `FISH_TTS_KEY`** — 用户在页面自行配置，避免白嫖额度。
 
@@ -86,6 +87,8 @@ SSE listener（`server/api/sse.py`）使用 raw asyncpg，需额外处理 `ssl=F
 `deploy/Caddyfile` 将所有请求统一到 :8080：
 
 - `/episodes` + `/episodes/*` → FastAPI（注意需要两条规则，`/*` 不匹配裸路径）
+- `/episodes/*/stream` → FastAPI（SSE 端点，禁用 buffer 以确保实时推流）
+- `/keys` + `/keys/*` → FastAPI
 - `/audio/*`、`/healthz`、`/docs`、`/openapi.json` → FastAPI
 - 其余 → Next.js
 

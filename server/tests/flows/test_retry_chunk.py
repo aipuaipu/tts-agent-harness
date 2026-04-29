@@ -188,7 +188,7 @@ def wire_deps(seeded, storage, fake_fish, monkeypatch):
     configure_p2_dependencies(
         session_factory=seeded,
         storage=storage,
-        fish_client_factory=lambda: fake_fish,
+        tts_client_factory=lambda provider: fake_fish,
     )
     configure_p2v_dependencies(
         session_factory=seeded,
@@ -203,7 +203,7 @@ def wire_deps(seeded, storage, fake_fish, monkeypatch):
     yield
     p2_module._session_factory = None
     p2_module._storage = None
-    p2_module._fish_client_factory = None
+    p2_module._tts_client_factory = None
     p2v_module._session_factory = None
     p2v_module._storage = None
     p2v_module._http_client_factory = None

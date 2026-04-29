@@ -292,7 +292,9 @@ export interface components {
              */
             config: string;
             /** Script */
-            script: string;
+            script?: string | null;
+            /** Script Text */
+            scriptText?: string | null;
         };
         /**
          * ChunkDetail

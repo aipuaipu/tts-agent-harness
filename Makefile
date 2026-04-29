@@ -30,6 +30,7 @@ WEB_PID      := /tmp/tts-harness-web.pid
 WHISPERX_PID := /tmp/tts-harness-whisperx.pid
 
 .PHONY: help env-dev env-prod env-test dev down status logs migrate psql \
+        start wait-infra \
         serve serve-api serve-web serve-whisperx stop open \
         test test-e2e test-e2e-browser test-live test-all tsc gen-types
 
@@ -46,6 +47,7 @@ help:
 	@echo "    make env-test    switch to test            API=$(API_PORT) Web=$(WEB_PORT)"
 	@echo ""
 	@echo "  Infrastructure:"
+	@echo "    make start       one-shot startup (infra + wait + migrate + serve)"
 	@echo "    make dev         start docker stack"
 	@echo "    make down        stop docker stack"
 	@echo "    make status      container status"
@@ -87,6 +89,32 @@ dev:
 	$(COMPOSE) up -d
 	@echo ""
 	@echo "Infrastructure: PG=:$(POSTGRES_PORT) MinIO=:$(MINIO_API_PORT) Prefect=:$(PREFECT_PORT)"
+
+wait-infra:
+	@echo "Waiting for infrastructure health checks..."
+	@for name in tts-harness-postgres tts-harness-minio tts-harness-prefect-server; do \
+		printf "  %s" "$$name"; \
+		ready=0; \
+		for i in $$(seq 1 60); do \
+			status=$$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$$name" 2>/dev/null || echo "missing"); \
+			if [ "$$status" = "healthy" ] || [ "$$status" = "running" ]; then \
+				ready=1; \
+				break; \
+			fi; \
+			printf "."; \
+			sleep 2; \
+		done; \
+		if [ "$$ready" -ne 1 ]; then \
+			echo ""; \
+			echo "Infrastructure not ready: $$name"; \
+			exit 1; \
+		fi; \
+		echo " ready"; \
+	done
+
+start: dev wait-infra migrate serve
+	@echo ""
+	@echo "One-shot startup complete. Open: http://localhost:$(WEB_PORT)"
 
 down:
 	$(COMPOSE) down
@@ -175,7 +203,7 @@ serve-whisperx:
 		echo "Starting WhisperX (local .venv)..."; \
 		MODEL_CACHE_DIR="$$HOME/.cache/huggingface/hub" \
 		HF_HOME="$$HOME/.cache/huggingface" \
-		nohup .venv/bin/uvicorn whisperx-svc.server:app \
+		cd whisperx-svc && nohup ../.venv/bin/uvicorn server:app \
 			--host 0.0.0.0 --port 7860 --log-level $(LOG_LEVEL) \
 			> /tmp/tts-harness-whisperx.log 2>&1 & \
 		echo $$! > $(WHISPERX_PID); \

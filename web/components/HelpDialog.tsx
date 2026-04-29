@@ -59,7 +59,7 @@ export function HelpDialog({ open, onClose }: Props) {
             </h3>
             <p className="mb-3 text-neutral-600 dark:text-neutral-400">
               每个 script.json 可以携带 <code className={codeClass}>tts_config</code>
-              ，覆盖全局默认，让不同稿子使用不同 TTS 参数（声音、温度、语速）而不影响其他 episode。
+              ，覆盖全局默认，让不同稿子切换不同 TTS provider 和参数，而不影响其他 episode。
             </p>
 
             <h4 className="font-semibold mt-4 mb-1.5">配置优先级</h4>
@@ -73,11 +73,11 @@ export function HelpDialog({ open, onClose }: Props) {
   "title": "拒绝自拟合",
   "description": "Alex 的第 42 期",
   "tts_config": {
+    "provider": "fish",
     "model": "s2-pro",
     "normalize": false,
     "temperature": 0.3,
     "top_p": 0.5,
-    "speed": 1.25,
     "reference_id": "7f3a2b..."
   },
   "segments": [
@@ -99,12 +99,15 @@ export function HelpDialog({ open, onClose }: Props) {
                 </thead>
                 <tbody>
                   {[
-                    ["model", "string", "s2-pro", "Fish TTS 模型（s1 / s2-pro）"],
+                    ["provider", "string", "fish", "当前支持 fish / xiaomi_mimo"],
+                    ["model", "string", "s2-pro", "Fish TTS 模型（provider=fish）"],
                     ["normalize", "boolean", "false", "让 Fish 引擎自动做文本归一化。英文混合建议 false"],
-                    ["temperature", "number", "0.3", "采样温度。低=稳定，高=发音多样"],
-                    ["top_p", "number", "0.5", "nucleus sampling 截断"],
-                    ["speed", "number", "1.25", "atempo 后处理速度。1.0=原速"],
-                    ["reference_id", "string", '""', "声音克隆 ID"],
+                    ["temperature", "number", "0.3", "采样温度（provider=fish）"],
+                    ["top_p", "number", "0.5", "nucleus sampling 截断（provider=fish）"],
+                    ["reference_id", "string", '""', "声音克隆 ID（provider=fish）"],
+                    ["model", "string", "mimo-v2.5-tts", "Xiaomi MiMo TTS 模型（provider=xiaomi_mimo）"],
+                    ["voice", "string", "mimo_default", "Xiaomi MiMo 内置音色或 voiceclone data URI（provider=xiaomi_mimo）"],
+                    ["style_prompt", "string", '""', "Xiaomi MiMo 可选 user 消息，用于风格控制（provider=xiaomi_mimo）"],
                     ["concurrency", "number", "6", "并行 API 调用数（仅 .harness/config.json 有效）"],
                   ].map(([field, type, def, desc]) => (
                     <tr key={field}>
@@ -124,9 +127,12 @@ export function HelpDialog({ open, onClose }: Props) {
 
             <h4 className="font-semibold mt-4 mb-1.5">可覆盖的环境变量</h4>
             <ul className="text-xs space-y-1 text-neutral-700 dark:text-neutral-300">
+              <li><code className={codeClass}>TTS_PROVIDER</code> → <code className="font-mono">provider</code></li>
               <li><code className={codeClass}>FISH_TTS_MODEL</code> → <code className="font-mono">model</code></li>
               <li><code className={codeClass}>FISH_TTS_REFERENCE_ID</code> → <code className="font-mono">reference_id</code></li>
-              <li><code className={codeClass}>TTS_SPEED</code> → <code className="font-mono">speed</code></li>
+              <li><code className={codeClass}>XIAOMI_MIMO_API_KEY</code> → Xiaomi MiMo 服务端 API Key</li>
+              <li><code className={codeClass}>XIAOMI_MIMO_TTS_MODEL</code> → <code className="font-mono">model</code></li>
+              <li><code className={codeClass}>XIAOMI_MIMO_TTS_VOICE</code> → <code className="font-mono">voice</code></li>
             </ul>
             <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
               只有这三个能用 env 临时覆盖；其他参数必须改 config 文件。

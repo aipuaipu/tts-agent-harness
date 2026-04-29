@@ -237,13 +237,13 @@ def wire_all_deps(seeded, storage, fake_fish, monkeypatch):
 
     holder = {"client": fake_fish}
 
-    def fish_factory():
+    def tts_factory(provider: str):
         return holder["client"]
 
     configure_p2_dependencies(
         session_factory=seeded,
         storage=storage,
-        fish_client_factory=fish_factory,
+        tts_client_factory=tts_factory,
     )
 
     transport = _mock_transport()
@@ -271,7 +271,7 @@ def wire_all_deps(seeded, storage, fake_fish, monkeypatch):
     # Clean up module globals.
     p2_module._session_factory = None
     p2_module._storage = None
-    p2_module._fish_client_factory = None
+    p2_module._tts_client_factory = None
     p2v_module._session_factory = None
     p2v_module._storage = None
     p2v_module._http_client_factory = None
@@ -366,7 +366,7 @@ async def test_p2_failure_aborts(seeded, storage):
     configure_p2_dependencies(
         session_factory=session_factory,
         storage=storage,
-        fish_client_factory=lambda: bad_fish,
+        tts_client_factory=lambda provider: bad_fish,
     )
 
     with pytest.raises(FishAuthError):

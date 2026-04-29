@@ -40,7 +40,14 @@ from server.core.repositories import (
     TakeRepo,
 )
 from server.core.models import Event
+from server.core.script_import import import_script
 from server.core.storage import MinIOStorage, episode_script_key
+from server.core.tts_provider import (
+    build_tts_client_factory,
+    provider_auth_message,
+    provider_auth_required,
+    resolve_tts_provider,
+)
 from server.api.deps import get_prefect_client, get_session, get_storage
 
 router = APIRouter(tags=["episodes"])
@@ -165,16 +172,35 @@ async def list_episodes(
 async def create_episode(
     id: str = Form(...),
     title: str = Form(""),
-    description: str = Form(None),
+    description: str | None = Form(None),
     config: str = Form("{}"),
-    script: UploadFile = File(...),
+    script: UploadFile | None = File(None),
+    script_text: str | None = Form(None),
     session: AsyncSession = Depends(get_session),
     storage: MinIOStorage = Depends(get_storage),
 ) -> EpisodeView:
-    # Upload script to MinIO
-    script_bytes = await script.read()
+    raw_text = (script_text or "").strip()
+    if script is None and not raw_text:
+        raise DomainError("invalid_input", "provide a script file or script_text")
+    if script is not None and raw_text:
+        raise DomainError("invalid_input", "provide either script or script_text, not both")
 
-    # Validate JSON
+    source_name = "pasted"
+    try:
+        if script is not None:
+            source_name = script.filename or "upload"
+            imported = import_script(
+                await script.read(),
+                filename=script.filename,
+                content_type=script.content_type,
+            )
+        else:
+            imported = import_script(raw_text)
+    except ValueError as exc:
+        raise DomainError("invalid_input", str(exc)) from exc
+
+    script_bytes = json.dumps(imported.script, ensure_ascii=False).encode("utf-8")
+
     try:
         json.loads(script_bytes)
     except json.JSONDecodeError as exc:
@@ -198,10 +224,14 @@ async def create_episode(
 
     payload = EpisodeCreate(
         id=id,
-        title=title or id,
+        title=title.strip() or imported.suggested_title or id,
         description=description,
         script_uri=script_uri,
         config=config_dict,
+        metadata={
+            "script_source_format": imported.source_format,
+            "script_source_name": source_name,
+        },
     )
     ep = await repo.create(payload)
 
@@ -470,19 +500,22 @@ async def run_episode(
         from server.flows.worker_bootstrap import bootstrap as _bootstrap
         _bootstrap()
 
-        # Resolve Fish API key for modes that use P2 (not chunk_only)
+        # Resolve runtime TTS provider credentials for modes that use P2.
         if mode != "chunk_only":
+            provider = resolve_tts_provider(ep.config or {})
             fish_key = x_fish_key or os.environ.get("FISH_TTS_KEY", "")
-            if not fish_key:
-                raise DomainError("auth_required", "Fish API Key 未配置。请在设置中填入 API Key。")
+            if provider_auth_required(provider) and not fish_key:
+                raise DomainError("auth_required", provider_auth_message(provider))
             # Re-configure P2 with the resolved key (may differ from env var)
             from server.flows.tasks.p2_synth import configure_p2_dependencies
-            from server.core.fish_client import FishTTSClient
             from server.flows.worker_bootstrap import _session_factory, _storage
             configure_p2_dependencies(
                 session_factory=_session_factory,
                 storage=_storage,
-                fish_client_factory=lambda: FishTTSClient(api_key=fish_key),
+                tts_client_factory=build_tts_client_factory(
+                    fish_api_key=fish_key,
+                    xiaomi_mimo_api_key=os.environ.get("XIAOMI_MIMO_API_KEY", ""),
+                ),
             )
 
             # Re-configure P2v with Groq key (if available)
@@ -858,18 +891,22 @@ async def retry_chunk(
         from datetime import datetime, timezone
         _bootstrap()
 
-        # Resolve Fish API key for P2 stage
+        # Resolve runtime TTS provider credentials for P2 stage.
         if from_stage == "p2":
+            ep = await EpisodeRepo(session).get(episode_id)
+            provider = resolve_tts_provider((ep.config if ep else None) or {})
             fish_key = x_fish_key or os.environ.get("FISH_TTS_KEY", "")
-            if not fish_key:
-                raise DomainError("auth_required", "Fish API Key 未配置。请在设置中填入 API Key。")
+            if provider_auth_required(provider) and not fish_key:
+                raise DomainError("auth_required", provider_auth_message(provider))
             from server.flows.tasks.p2_synth import configure_p2_dependencies
-            from server.core.fish_client import FishTTSClient
             from server.flows.worker_bootstrap import _session_factory as _sf, _storage as _st
             configure_p2_dependencies(
                 session_factory=_sf,
                 storage=_st,
-                fish_client_factory=lambda: FishTTSClient(api_key=fish_key),
+                tts_client_factory=build_tts_client_factory(
+                    fish_api_key=fish_key,
+                    xiaomi_mimo_api_key=os.environ.get("XIAOMI_MIMO_API_KEY", ""),
+                ),
             )
 
         # Re-configure P2v with Groq key for stages that use ASR

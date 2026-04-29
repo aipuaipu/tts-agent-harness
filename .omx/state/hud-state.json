@@ -1,0 +1,6 @@
+{
+  "last_turn_at": "2026-04-24T07:53:53.342Z",
+  "turn_count": 7,
+  "last_progress_at": "2026-04-24T07:53:53.342Z",
+  "last_agent_output": "我已经把仓库里“一键启动”脚本本身的问题修掉了，主要在 [start.ps1](/D:/tts-agent-harness/start.ps1:19) 和 [Makefile](/D:/tts-age"
+}

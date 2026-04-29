@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import useSWR from "swr";
-import type { ChunkEdit, Episode, EpisodeSummary, StageName } from "./types";
+import type { ChunkEdit, CreateEpisodeInput, Episode, EpisodeSummary, StageName } from "./types";
 import type { components } from "./gen/openapi";
 import { api, getApiUrl } from "./api-client";
 import { connectSSE } from "./sse-client";
@@ -102,13 +102,14 @@ export function useEpisode(id: string | null): HookResult<Episode> {
 // Imperative operations (type-safe via openapi-fetch)
 // ---------------------------------------------------------------------------
 
-export async function createEpisode(id: string, file: File): Promise<void> {
+export async function createEpisode(input: CreateEpisodeInput): Promise<void> {
   const { error } = await api.POST("/episodes", {
-    body: { id, script: file } as never, // multipart — openapi-fetch handles FormData
-    bodySerializer: (body: Record<string, unknown>) => {
+    body: input as never,
+    bodySerializer: (body: CreateEpisodeInput) => {
       const fd = new FormData();
-      fd.append("id", body.id as string);
-      fd.append("script", body.script as File);
+      fd.append("id", body.id);
+      if (body.file) fd.append("script", body.file);
+      if (body.scriptText) fd.append("script_text", body.scriptText);
       return fd;
     },
   });

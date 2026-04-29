@@ -671,6 +671,133 @@
         }
       }
     },
+    "/episodes/{episode_id}/lock": {
+      "post": {
+        "tags": [
+          "episodes"
+        ],
+        "summary": "Lock Episode",
+        "operationId": "lock_episode_episodes__episode_id__lock_post",
+        "parameters": [
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Episode Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LockResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/episodes/{episode_id}/unlock": {
+      "post": {
+        "tags": [
+          "episodes"
+        ],
+        "summary": "Unlock Episode",
+        "operationId": "unlock_episode_episodes__episode_id__unlock_post",
+        "parameters": [
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Episode Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LockResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/episodes/{episode_id}/cancel": {
+      "post": {
+        "tags": [
+          "episodes"
+        ],
+        "summary": "Cancel Episode",
+        "description": "Cancel a running episode pipeline.",
+        "operationId": "cancel_episode_episodes__episode_id__cancel_post",
+        "parameters": [
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Episode Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/episodes/{episode_id}/chunks/{chunk_id}/log": {
       "get": {
         "tags": [
@@ -716,6 +843,69 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ChunkLogResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/episodes/{episode_id}/chunks/{chunk_id}/stage-context": {
+      "get": {
+        "tags": [
+          "episodes"
+        ],
+        "summary": "Get Stage Context",
+        "description": "Return the latest execution context (request/response params) for a stage.\n\nReads from events table \u2014 the stage_ok/stage_failed event payload\nwritten by dev runner with request/response context.",
+        "operationId": "get_stage_context_episodes__episode_id__chunks__chunk_id__stage_context_get",
+        "parameters": [
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Episode Id"
+            }
+          },
+          {
+            "name": "chunk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Chunk Id"
+            }
+          },
+          {
+            "name": "stage",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Stage"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Stage Context Episodes  Episode Id  Chunks  Chunk Id  Stage Context Get"
                 }
               }
             }
@@ -787,6 +977,100 @@
         }
       }
     },
+    "/episodes/{episode_id}/script": {
+      "get": {
+        "tags": [
+          "episodes"
+        ],
+        "summary": "Get Episode Script",
+        "description": "Return the original script.json for this episode.",
+        "operationId": "get_episode_script_episodes__episode_id__script_get",
+        "parameters": [
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Episode Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/episodes/{episode_id}/export": {
+      "get": {
+        "tags": [
+          "episodes"
+        ],
+        "summary": "Export Episode",
+        "description": "Export episode production assets as a zip file.\n\nProduces Remotion-compatible output:\n  {episode_id}/\n    shot01.wav, shot02.wav, ...\n    subtitles.json   \u2014 {shot_id: [{id, text, start, end}]} with shot-level offsets\n    durations.json   \u2014 [{id, duration_s, file}]",
+        "operationId": "export_episode_episodes__episode_id__export_get",
+        "parameters": [
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Episode Id"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Export format: shots (per-shot WAV + subtitles)",
+              "default": "shots",
+              "title": "Format"
+            },
+            "description": "Export format: shots (per-shot WAV + subtitles)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/healthz": {
       "get": {
         "tags": [
@@ -805,6 +1089,87 @@
                   },
                   "type": "object",
                   "title": "Response Healthz Healthz Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys": {
+      "post": {
+        "tags": [
+          "keys"
+        ],
+        "summary": "Save Keys",
+        "operationId": "save_keys_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeysBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeysStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "keys"
+        ],
+        "summary": "Delete Keys",
+        "operationId": "delete_keys_keys_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeysStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys/status": {
+      "get": {
+        "tags": [
+          "keys"
+        ],
+        "summary": "Keys Status",
+        "operationId": "keys_status_keys_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeysStatus"
                 }
               }
             }
@@ -881,7 +1246,14 @@
             "default": ""
           },
           "description": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Description"
           },
           "config": {
@@ -890,17 +1262,47 @@
             "default": "{}"
           },
           "script": {
-            "type": "string",
-            "contentMediaType": "application/octet-stream",
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Script"
+          },
+          "script_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Script Text"
           }
         },
         "type": "object",
         "required": [
-          "id",
-          "script"
+          "id"
         ],
         "title": "Body_create_episode_episodes_post"
+      },
+      "CancelResponse": {
+        "properties": {
+          "cancelled": {
+            "type": "boolean",
+            "title": "Cancelled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cancelled"
+        ],
+        "title": "CancelResponse"
       },
       "ChunkDetail": {
         "properties": {
@@ -1008,6 +1410,32 @@
             "type": "array",
             "title": "Stageruns",
             "default": []
+          },
+          "verifyScores": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verifyscores"
+          },
+          "verifyDiagnosis": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verifydiagnosis"
           }
         },
         "type": "object",
@@ -1159,6 +1587,11 @@
             "type": "object",
             "title": "Config"
           },
+          "locked": {
+            "type": "boolean",
+            "title": "Locked",
+            "default": false
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -1247,6 +1680,11 @@
             ],
             "title": "Status"
           },
+          "locked": {
+            "type": "boolean",
+            "title": "Locked",
+            "default": false
+          },
           "chunkCount": {
             "type": "integer",
             "title": "Chunkcount"
@@ -1319,6 +1757,11 @@
             "type": "object",
             "title": "Config"
           },
+          "locked": {
+            "type": "boolean",
+            "title": "Locked",
+            "default": false
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -1386,6 +1829,76 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "KeysBody": {
+        "properties": {
+          "fish_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fish Key"
+          },
+          "groq_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Groq Key"
+          }
+        },
+        "type": "object",
+        "title": "KeysBody"
+      },
+      "KeysStatus": {
+        "properties": {
+          "fish": {
+            "type": "boolean",
+            "title": "Fish"
+          },
+          "groq": {
+            "type": "boolean",
+            "title": "Groq"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fish",
+          "groq"
+        ],
+        "title": "KeysStatus"
+      },
+      "LockResponse": {
+        "properties": {
+          "locked": {
+            "type": "boolean",
+            "title": "Locked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "locked"
+        ],
+        "title": "LockResponse"
       },
       "RetryResponse": {
         "properties": {

@@ -80,7 +80,7 @@
 
 - 按 shot 拼接音频，插入 padding 和间隔
 - 偏移字幕时间戳，对齐拼接后的时间线
-- 打包导出 zip
+- 打包导出 zip（页面提供防重复点击保护以及「导出中...」的进度与错误处理反馈）
 
 导出产物：
 
@@ -100,8 +100,9 @@ episode-export.zip/
 ### API Key 管理
 
 - 用户在页面配置自己的 Fish Audio 和 Groq API Key
-- Key 通过加密 Cookie 存储在服务端，不会明文传输或出现在日志中
-- 保存时自动验证 Key 有效性
+- **安全存储**：Key 通过 `COOKIE_SECRET` 加密后存储在客户端的 HttpOnly Cookie 中，避免暴露在浏览器 localStorage 或被扩展截取，也不会明文传输或出现在日志中
+- **验证机制**：保存时自动连接服务端点测试其有效性，验证通过后才会保存
+- **交互优化**：配置过的 Key 会自动折叠输入框（仅点击展开时显示），并从底层禁用了各大浏览器和密码管理器的自动填充（Autofill）行为
 
 ### TTS 配置
 
@@ -149,6 +150,7 @@ episode-export.zip/
 - **ASR 引擎**：Groq Whisper API（线上）/ WhisperX（本地）
 - **后端**：FastAPI + SQLAlchemy + Alembic
 - **前端**：Next.js 16 + Zustand + Tailwind CSS v4 + Radix UI
+- **通信**：基于 SSE（Server-Sent Events）实现处理进度实时推送（反向代理禁用 buffer 确保低延迟）
 - **存储**：PostgreSQL（元数据）+ MinIO/Tigris（音频文件）
 - **音频处理**：ffmpeg
 - **部署**：Fly.io（东京机房）

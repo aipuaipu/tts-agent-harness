@@ -1,0 +1,81 @@
+WARNING:root:COOKIE_SECRET not set — using random key, cookies will not survive restarts
+INFO:     Started server process [15520]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8100 (Press CTRL+C to quit)
+WARNING:server.core.groq_asr_client:Groq 429 rate limited, retry 1/5 after 3.0s
+WARNING:server.core.groq_asr_client:Groq 429 rate limited, retry 1/5 after 3.0s
+WARNING:server.core.groq_asr_client:Groq 429 rate limited, retry 1/5 after 3.0s
+WARNING:server.core.groq_asr_client:Groq 429 rate limited, retry 2/5 after 3.0s
+WARNING:server.core.groq_asr_client:Groq 429 rate limited, retry 2/5 after 3.0s
+WARNING:server.core.groq_asr_client:Groq 429 rate limited, retry 1/5 after 3.0s
+WARNING:server.core.groq_asr_client:Groq 429 rate limited, retry 3/5 after 3.0s
+WARNING:server.core.groq_asr_client:Groq 429 rate limited, retry 2/5 after 3.0s
+WARNING:server.core.groq_asr_client:Groq 429 rate limited, retry 3/5 after 3.0s
+ERROR:finalize_take:finalize failed: All connection attempts failed
+Traceback (most recent call last):
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpcore\_async\connection.py", line 101, in handle_async_request
+    raise exc
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpcore\_async\connection.py", line 78, in handle_async_request
+    stream = await self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpcore\_async\connection.py", line 124, in _connect
+    stream = await self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpcore\_backends\auto.py", line 31, in connect_tcp
+    return await self._backend.connect_tcp(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpcore\_backends\anyio.py", line 113, in connect_tcp
+    with map_exceptions(exc_map):
+  File "C:\Users\aipua\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\tts-agent-harness\server\api\routes\episodes.py", line 1063, in _finalize_dev
+    await run_p3_transcribe(chunk_id)
+  File "D:\tts-agent-harness\server\flows\tasks\p3_transcribe.py", line 211, in run_p3_transcribe
+    transcript_data = await _call_whisperx(client, wav_bytes, language)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\tts-agent-harness\server\flows\tasks\p3_transcribe.py", line 296, in _call_whisperx
+    response = await client.post(url, files=files, data=data)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpx\_client.py", line 1859, in post
+    return await self.request(
+           ^^^^^^^^^^^^^^^^^^^
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+  File "C:\Users\aipua\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "D:\tts-agent-harness\.venv-server\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: All connection attempts failed

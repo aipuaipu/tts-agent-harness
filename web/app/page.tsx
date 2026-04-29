@@ -2,7 +2,7 @@
 
 import { useEffect, useCallback, useState } from "react";
 import useSWR from "swr";
-import type { Episode, StageName } from "@/lib/types";
+import type { CreateEpisodeInput, Episode, StageName } from "@/lib/types";
 import { useHarnessStore } from "@/lib/store";
 import { useEpisodes, useEpisode, useEpisodeLogs, getAudioUrl } from "@/lib/hooks";
 import { getApiUrl } from "@/lib/api-client";
@@ -75,10 +75,10 @@ export default function Page() {
   );
 
   const [execCreate] = useAction(
-    useCallback(async (id: string, file: File) => {
-      await store.createEpisode(id, file);
+    useCallback(async (input: CreateEpisodeInput) => {
+      await store.createEpisode(input);
       await mutateList();
-      store.selectEpisode(id);
+      store.selectEpisode(input.id);
       setNewEpOpen(false);
     }, [store, mutateList]),
     { errorPrefix: "创建失败" },

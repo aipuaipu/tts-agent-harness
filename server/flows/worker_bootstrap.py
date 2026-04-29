@@ -66,17 +66,17 @@ def bootstrap() -> None:
 
     # Wire P2.
     from server.flows.tasks.p2_synth import configure_p2_dependencies
-    from server.core.fish_client import FishTTSClient
+    from server.core.tts_provider import build_tts_client_factory
 
     fish_api_key = _env("FISH_TTS_KEY", "")
-
-    def _fish_factory() -> FishTTSClient:
-        return FishTTSClient(api_key=fish_api_key)
 
     configure_p2_dependencies(
         session_factory=_session_factory,
         storage=_storage,
-        fish_client_factory=_fish_factory,
+        tts_client_factory=build_tts_client_factory(
+            fish_api_key=fish_api_key,
+            xiaomi_mimo_api_key=_env("XIAOMI_MIMO_API_KEY", ""),
+        ),
     )
 
     # Wire P3 (kept for backward compat).
