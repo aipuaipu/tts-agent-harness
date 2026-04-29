@@ -1,9 +1,18 @@
 # TTS Agent Harness
 
+当前版本：**[2026.04.29.15.08]** (详细更新日志见 [CHANGELOG.md](CHANGELOG.md))
+
 确定性视频脚本转语音加字幕生产工具。输入脚本 JSON，输出 per-shot WAV + 时间对齐字幕。
 
 **原项目在线 Demo**: https://hiveden-tts.fly.dev
 **新项目在线 Demo**: 待部署
+
+## 最新特性 (Recent Updates)
+
+- **多端接口接入**：新增支持直连 Xiaomi MiMo 官方 TTS 服务端 API。
+- **输入方式大拓展**：除了标准的 `script.json`，现在支持直接上传 `.md` / `.txt` 文档，或者在 Web UI 中直接粘贴剪贴板文案，系统会自动智能分段。
+- **安全与体验全面提升**：前端 API Key 升级为加密 HttpOnly Cookie 存储极大提升安全性；音频支持带倍速的连续播放；并重构了大量的页面交互（如下载 Loading、配置展开折叠等）。
+
 
 ## 架构
 
