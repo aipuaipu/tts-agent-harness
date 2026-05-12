@@ -95,7 +95,7 @@ export function RetryRow({
                 clickable ? "cursor-pointer hover:brightness-110" : "cursor-default",
               ].join(" ")}
             >
-              {stage === "p2" ? "P2" : stage === "p2c" ? "2c" : "2v"}
+              {{"p2": "合成", "p2c": "初筛", "p2v": "校验"}[stage] || stage}
             </button>
           );
         })}

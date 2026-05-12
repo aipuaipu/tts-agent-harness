@@ -126,7 +126,7 @@ export function NewEpisodeDialog({ open, onClose, onCreate }: Props) {
       <div className="w-full max-w-2xl rounded-2xl border border-neutral-200 bg-white p-5 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900 dark:shadow-neutral-950">
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">新建 Episode</h2>
+            <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">新建项目</h2>
             <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
               不再要求先手写 JSON。直接导入脚本文档，或把文案粘贴进来即可。
             </p>
@@ -170,7 +170,7 @@ export function NewEpisodeDialog({ open, onClose, onCreate }: Props) {
         <div className="mb-4 grid gap-4 md:grid-cols-[1.1fr_0.9fr]">
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-              Episode ID
+              项目 ID
             </label>
             <input
               type="text"
@@ -278,7 +278,7 @@ export function NewEpisodeDialog({ open, onClose, onCreate }: Props) {
               disabled={!canCreate || submitting}
               className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
             >
-              {submitting ? "创建中..." : "创建 Episode"}
+              {submitting ? "创建中..." : "创建项目"}
             </button>
           </div>
         </div>

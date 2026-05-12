@@ -212,6 +212,12 @@ def test_build_params_from_env_overrides_take_precedence(monkeypatch):
     assert params.temperature == 0.3
 
 
+def test_build_params_from_env_ignores_mimo_model_for_fish(monkeypatch):
+    monkeypatch.delenv("FISH_TTS_MODEL", raising=False)
+    params = build_params_from_env({"model": "mimo-v2.5-tts"})
+    assert params.model == "s2-pro"
+
+
 # ---------------------------------------------------------------------------
 # Optional live integration test — only runs when FISH_TTS_KEY is set.
 # Explicitly marked so it can be excluded via ``-m "not live"``.

@@ -153,6 +153,73 @@ class TestHealthz:
         assert resp.json()["status"] == "ok"
 
 
+class TestFishVoices:
+    async def test_list_fish_voices_maps_model_api_response(self, client: AsyncClient):
+        class MockResponse:
+            status_code = 200
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, Any]:
+                return {
+                    "items": [
+                        {
+                            "_id": "voice-1",
+                            "title": "Official Voice",
+                            "description": "demo",
+                            "visibility": "public",
+                            "languages": ["zh"],
+                            "tags": ["tts", "female", "young"],
+                            "samples": [{"audio": "https://example.com/audio.mp3"}],
+                        }
+                    ],
+                    "total": 1,
+                    "has_more": False,
+                }
+
+        class MockHttpClient:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            async def get(self, url: str, headers: dict[str, str], params: dict[str, object]):
+                assert url == "https://api.fish.audio/model"
+                assert headers["Authorization"] == "Bearer test-fish-key"
+                assert params["page_size"] == 100
+                return MockResponse()
+
+        with patch.dict(os.environ, {"FISH_TTS_KEY": "test-fish-key"}), patch(
+            "server.api.routes.keys.httpx.AsyncClient",
+            MockHttpClient,
+        ):
+            resp = await client.get("/tts/fish-voices")
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "items": [
+                {
+                    "id": "voice-1",
+                    "title": "Official Voice",
+                    "description": "demo",
+                    "visibility": "public",
+                    "languages": ["zh"],
+                    "tags": ["tts", "female", "young"],
+                    "gender": "female",
+                    "age": "young",
+                    "preview_url": "https://example.com/audio.mp3",
+                }
+            ],
+            "total": 1,
+            "has_more": False,
+        }
+
+
 class TestEpisodeCRUD:
     async def test_create_episode(self, client: AsyncClient):
         script = json.dumps({"title": "My Ep", "segments": []})

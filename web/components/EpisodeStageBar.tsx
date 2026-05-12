@@ -40,8 +40,10 @@ function pillColor(agg: StageAgg): string {
   return "bg-neutral-200 text-neutral-500";
 }
 
+const EPISODE_LABELS: Record<string, string> = { p1: "切分", p1c: "预检", p2: "合成", p2c: "初筛", p2v: "校验", p5: "字幕", p6: "拼接", p6v: "验收" };
+
 function pillLabel(stage: StageName, agg: StageAgg): string {
-  const label = stage.toUpperCase();
+  const label = EPISODE_LABELS[stage] || stage.toUpperCase();
   if (agg.running > 0) return `${label}...`;
   if (agg.failed > 0) return `${label} ⚠${agg.failed}`;
   if (agg.ok === agg.total && agg.total > 0) return `${label} ✓`;

@@ -137,6 +137,10 @@ def script_to_chunks(script: dict, episode_id: str) -> list[ChunkInput]:
         sentences = split_segment_into_sentences(raw_text)
         for sentence_idx, sentence in enumerate(sentences, start=1):
             text_normalized = sentence.strip()
+            
+            # 替换英文复合词中间的连字符为空格，避免 TTS 误读为“减号” (e.g. Human-in-the-Loop)
+            text_normalized = re.sub(r"(?<=[a-zA-Z])-(?=[a-zA-Z])", " ", text_normalized)
+
             if not text_normalized:
                 # split_segment_into_sentences already drops whitespace-only
                 # fragments, but we double-check after .strip() in case of

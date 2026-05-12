@@ -32,9 +32,9 @@ export function TakeSelector({
               <span className="inline-flex items-center justify-center w-3 h-3 rounded-full border border-neutral-300 text-[8px] font-bold cursor-help hover:border-neutral-500">?</span>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>每次合成（P2）会生成一个 Take。</p>
+              <p>每次合成会生成一个 Take。</p>
               <p className="mt-1">▶ 试听某个 Take</p>
-              <p>Use 设为当前版本（会重跑 P3→P5）</p>
+              <p>Use 设为当前版本（会触发后续重跑）</p>
               <p className="mt-1 text-neutral-400">✓ current 表示当前选中的 Take</p>
             </TooltipContent>
           </Tooltip>

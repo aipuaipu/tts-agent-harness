@@ -39,6 +39,12 @@ from .domain import FishTTSParams
 
 FISH_TTS_URL = "https://api.fish.audio/v1/tts"
 DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
+DEFAULT_FISH_TTS_MODEL = "s2-pro"
+XIAOMI_MIMO_TTS_MODELS = {
+    "mimo-v2.5-tts",
+    "mimo-v2.5-tts-voiceclone",
+    "mimo-v2.5-tts-voicedesign",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +74,15 @@ class FishServerError(FishTTSError):
 
 class FishClientError(FishTTSError):
     """Other 4xx, empty body, or malformed response — not retryable."""
+
+
+def fish_http_proxy() -> str | None:
+    return (
+        os.environ.get("FISH_HTTP_PROXY")
+        or os.environ.get("FISH_HTTPS_PROXY")
+        or os.environ.get("HTTPS_PROXY")
+        or os.environ.get("HTTP_PROXY")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +135,7 @@ class FishTTSClient:
             yield self._http
             return
         # Lazily create a long-lived client on first use.
-        self._http = httpx.AsyncClient(timeout=DEFAULT_TIMEOUT)
+        self._http = httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, proxy=fish_http_proxy())
         yield self._http
 
     # ----- public API --------------------------------------------------
@@ -237,6 +252,8 @@ def build_params_from_env(overrides: dict[str, Any] | None = None) -> FishTTSPar
         base["model"] = model
     if overrides:
         base.update(overrides)
+    if base.get("model") in XIAOMI_MIMO_TTS_MODELS:
+        base["model"] = DEFAULT_FISH_TTS_MODEL
     return FishTTSParams(**base)
 
 
@@ -249,4 +266,5 @@ __all__ = [
     "FishClientError",
     "FISH_TTS_URL",
     "build_params_from_env",
+    "fish_http_proxy",
 ]

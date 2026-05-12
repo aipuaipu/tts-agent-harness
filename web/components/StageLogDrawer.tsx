@@ -27,8 +27,8 @@ interface Props {
 }
 
 const STAGE_LABELS: Record<StageName, string> = {
-  p1: "P1", p1c: "P1c", p2: "P2", p2c: "P2c", p2v: "P2v",
-  p5: "P5", p6: "P6", p6v: "P6v",
+  p1: "切分", p1c: "预检", p2: "合成", p2c: "初筛", p2v: "校验",
+  p5: "字幕", p6: "拼接", p6v: "验收",
 };
 
 function statusBadge(sr: StageRun | undefined) {

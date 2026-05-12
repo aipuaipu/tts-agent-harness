@@ -104,3 +104,54 @@ async def test_synthesize_requires_audio_data_field():
             await client.synthesize("你好", XiaomiMimoTTSParams())
     finally:
         await client.aclose()
+
+
+async def test_internal_http_client_bypasses_env_proxy(monkeypatch: pytest.MonkeyPatch):
+    wav_bytes = b"RIFF\x00\x00\x00\x00WAVEfake"
+    captured: dict[str, object] = {}
+
+    class FakeAsyncClient:
+        async def post(self, url: str, *, json: dict[str, object], headers: dict[str, str]) -> httpx.Response:
+            captured["url"] = url
+            captured["body"] = json
+            captured["headers"] = headers
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "audio": {
+                                    "data": base64.b64encode(wav_bytes).decode("utf-8")
+                                }
+                            }
+                        }
+                    ]
+                },
+            )
+
+        async def aclose(self) -> None:
+            captured["closed"] = True
+
+    def fake_async_client(*args, **kwargs):
+        captured["trust_env"] = kwargs.get("trust_env")
+        captured["timeout"] = kwargs.get("timeout")
+        return FakeAsyncClient()
+
+    monkeypatch.setattr("server.core.xiaomi_mimo_client.httpx.AsyncClient", fake_async_client)
+
+    client = XiaomiMimoTTSClient(api_key="mimo-key")
+    try:
+        result = await client.synthesize("你好", XiaomiMimoTTSParams())
+    finally:
+        await client.aclose()
+
+    assert result == wav_bytes
+    assert captured["trust_env"] is False
+    assert captured["timeout"] == httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
+    assert captured["url"] == XIAOMI_MIMO_TTS_URL
+    assert captured["headers"] == {
+        "api-key": "mimo-key",
+        "Content-Type": "application/json",
+    }
+    assert captured["closed"] is True

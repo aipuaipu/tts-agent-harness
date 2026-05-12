@@ -122,7 +122,7 @@ export function ApiKeyDialog({ open, onClose }: Props) {
         <div className="px-5 py-4 space-y-6">
           <KeySection
             title="Fish Audio API Key"
-            description={<>用于 TTS 语音合成（P2 阶段）。<strong className="text-neutral-700 dark:text-neutral-300">必填</strong>，否则无法合成音频。</>}
+            description={<>用于 TTS 语音合成。<strong className="text-neutral-700 dark:text-neutral-300">必填</strong>，否则无法合成音频。</>}
             inputId="fish-api-key-input"
             placeholder="粘贴 API Key"
             value={fishKey}
@@ -138,7 +138,7 @@ export function ApiKeyDialog({ open, onClose }: Props) {
 
           <KeySection
             title="Groq API Key"
-            description={<>用于 ASR 语音转写（P2v 阶段）。<strong className="text-neutral-700 dark:text-neutral-300">必填</strong>，否则无法验证发音质量和生成字幕时间戳。免费额度足够日常使用。</>}
+            description={<>用于 ASR 语音转写校验。<strong className="text-neutral-700 dark:text-neutral-300">必填</strong>，否则无法验证发音质量和生成字幕时间戳。免费额度足够日常使用。</>}
             inputId="groq-api-key-input"
             placeholder="粘贴 API Key"
             value={groqKey}

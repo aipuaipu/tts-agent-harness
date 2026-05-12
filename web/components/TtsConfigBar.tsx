@@ -16,6 +16,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { FishVoicePicker } from "@/components/FishVoicePicker";
 
 interface Props {
   episodeId: string;
@@ -38,6 +39,8 @@ interface FormState {
   stylePrompt: string;
 }
 
+// FishVoice type is defined in FishVoicePicker.tsx
+
 const DEFAULTS: FormState = {
   provider: "xiaomi_mimo",
   model: "s2-pro",
@@ -50,15 +53,69 @@ const DEFAULTS: FormState = {
   stylePrompt: "",
 };
 
+const FISH_MODEL_OPTIONS = ["s2-pro", "s2"] as const;
+const MIMO_MODEL_OPTIONS = [
+  "mimo-v2.5-tts",
+  "mimo-v2.5-tts-voiceclone",
+  "mimo-v2.5-tts-voicedesign",
+] as const;
+
+const MIMO_VOICE_OPTIONS = [
+  { value: "mimo_default", label: "mimo_default", gender: "女", note: "默认" },
+  { value: "冰糖", label: "冰糖", gender: "女" },
+  { value: "茉莉", label: "茉莉", gender: "女" },
+  { value: "苏打", label: "苏打", gender: "男" },
+  { value: "白桦", label: "白桦", gender: "男" },
+  { value: "Mia", label: "Mia", gender: "女" },
+  { value: "Chloe", label: "Chloe", gender: "女" },
+  { value: "Milo", label: "Milo", gender: "男" },
+  { value: "Dean", label: "Dean", gender: "男" },
+] as const;
+
+const FISH_VOICE_OPTIONS = [
+  { value: "", label: "Fish 默认音色", note: "不使用 Reference ID" },
+] as const;
+
+function normalizeProvider(provider: unknown): Provider {
+  return String(provider ?? DEFAULTS.provider).replace("xiaomi_bridge", "xiaomi_mimo") === "xiaomi_mimo"
+    ? "xiaomi_mimo"
+    : "fish";
+}
+
+function normalizeFishModel(model: unknown): string {
+  const value = String(model ?? DEFAULTS.model);
+  return FISH_MODEL_OPTIONS.includes(value as (typeof FISH_MODEL_OPTIONS)[number]) ? value : DEFAULTS.model;
+}
+
+function normalizeMimoModel(model: unknown): string {
+  const value = String(model ?? DEFAULTS.mimoModel);
+  return MIMO_MODEL_OPTIONS.includes(value as (typeof MIMO_MODEL_OPTIONS)[number]) ? value : DEFAULTS.mimoModel;
+}
+
+function formatMimoVoiceLabel(voice: string): string {
+  const option = MIMO_VOICE_OPTIONS.find((item) => item.value === voice);
+  if (!option) return voice;
+  const note = "note" in option ? option.note : "";
+  return `${option.label} (${option.gender}${note ? `, ${note}` : ""})`;
+}
+
+function formatFishVoiceLabel(referenceId: string): string {
+  const option = FISH_VOICE_OPTIONS.find((item) => item.value === referenceId);
+  if (!option) return referenceId ? `自定义 ID (${referenceId.slice(0, 8)}...)` : "Fish 默认音色";
+  const note = "note" in option ? option.note : "";
+  return `${option.label}${note ? ` - ${note}` : ""}`;
+}
+
+// formatFishApiVoiceLabel removed — replaced by FishVoicePicker
+
 function configToForm(config: Record<string, unknown>): FormState {
-  const provider = String(config.provider ?? DEFAULTS.provider).replace("xiaomi_bridge", "xiaomi_mimo");
   return {
-    provider: provider === "xiaomi_mimo" ? "xiaomi_mimo" : "fish",
-    model: String(config.model ?? DEFAULTS.model),
+    provider: normalizeProvider(config.provider),
+    model: normalizeFishModel(config.model),
     temperature: String(config.temperature ?? DEFAULTS.temperature),
     top_p: String(config.top_p ?? DEFAULTS.top_p),
     reference_id: String(config.reference_id ?? DEFAULTS.reference_id),
-    mimoModel: String(config.model ?? DEFAULTS.mimoModel),
+    mimoModel: normalizeMimoModel(config.model),
     mimoVoice: String((typeof config.voice === "string" && !String(config.voice).startsWith("data:")) ? config.voice : DEFAULTS.mimoVoice),
     mimoVoiceDataUri: String(config.voice_data_uri ?? (typeof config.voice === "string" && String(config.voice).startsWith("data:") ? config.voice : DEFAULTS.mimoVoiceDataUri)),
     stylePrompt: String(config.style_prompt ?? DEFAULTS.stylePrompt),
@@ -79,7 +136,7 @@ function formToConfig(form: FormState): Record<string, unknown> {
 
   return {
     provider: "fish",
-    model: form.model,
+    model: normalizeFishModel(form.model),
     temperature: parseFloat(form.temperature) || 0.7,
     top_p: parseFloat(form.top_p) || 0.7,
     reference_id: form.reference_id || undefined,
@@ -110,10 +167,9 @@ export function TtsConfigBar({ episodeId, config, onConfigSaved, onUpdateConfig 
   const [savedHint, setSavedHint] = useState(false);
 
   const hasOverride = Object.keys(config).length > 0;
-  const provider = (String(config.provider ?? DEFAULTS.provider).replace("xiaomi_bridge", "xiaomi_mimo") === "xiaomi_mimo"
-    ? "xiaomi_mimo"
-    : "fish") as Provider;
-  const mimoModel = String(config.model ?? DEFAULTS.mimoModel);
+  const provider = normalizeProvider(config.provider);
+  const fishModel = normalizeFishModel(config.model);
+  const mimoModel = normalizeMimoModel(config.model);
   const mimoVoiceDataUri = String(config.voice_data_uri ?? (typeof config.voice === "string" && String(config.voice).startsWith("data:") ? config.voice : ""));
 
   const field = (key: string, value: string) => (
@@ -130,15 +186,15 @@ export function TtsConfigBar({ episodeId, config, onConfigSaved, onUpdateConfig 
         {field("provider", providerLabel(provider))}
         {provider === "fish" ? (
           <>
-            {field("model", String(config.model ?? DEFAULTS.model))}
+            {field("model", fishModel)}
             {field("temperature", String(config.temperature ?? DEFAULTS.temperature))}
             {field("top_p", String(config.top_p ?? DEFAULTS.top_p))}
-            {field("reference_id", String(config.reference_id || "(none)"))}
+            {field("voice", formatFishVoiceLabel(String(config.reference_id ?? DEFAULTS.reference_id)))}
           </>
         ) : (
           <>
             {field("model", mimoModel)}
-            {field("voice", mimoModel === "mimo-v2.5-tts-voiceclone" ? (mimoVoiceDataUri ? "data-uri" : "(missing)") : String(config.voice ?? DEFAULTS.mimoVoice))}
+            {field("voice", mimoModel === "mimo-v2.5-tts-voiceclone" ? (mimoVoiceDataUri ? "data-uri" : "(missing)") : formatMimoVoiceLabel(String(config.voice ?? DEFAULTS.mimoVoice)))}
             {field("style", String(config.style_prompt ?? "(none)"))}
           </>
         )}
@@ -156,12 +212,12 @@ export function TtsConfigBar({ episodeId, config, onConfigSaved, onUpdateConfig 
       {savedHint && (
         <div className="flex items-center gap-2 border-b border-emerald-200 bg-emerald-50 px-6 py-1 text-[11px] text-emerald-800">
           <span>✓ 已保存</span>
-          <span className="text-emerald-700">· 点 chunk 的 P2 pill → 仅重跑 P2 验证新配置</span>
+          <span className="text-emerald-700">· 点 chunk 的 合成 pill → 仅重跑 合成 验证新配置</span>
         </div>
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <ConfigForm
             episodeId={episodeId}
             config={config}
@@ -198,6 +254,7 @@ function ConfigForm({
   const [voiceFileName, setVoiceFileName] = useState<string>("");
   const set = (key: keyof FormState, value: string) => setForm((prev) => ({ ...prev, [key]: value }));
   const isVoiceClone = form.provider === "xiaomi_mimo" && form.mimoModel === "mimo-v2.5-tts-voiceclone";
+
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -254,8 +311,11 @@ function ConfigForm({
                 <HelpTip>Fish Audio 模型。现有后端保持兼容，默认 `s2-pro`。</HelpTip>
               </label>
               <select value={form.model} onChange={(event) => set("model", event.target.value)} className={inputClass}>
-                <option value="s2-pro">s2-pro</option>
-                <option value="s2">s2</option>
+                {FISH_MODEL_OPTIONS.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -274,10 +334,13 @@ function ConfigForm({
             </div>
             <div>
               <label className="mb-1 flex items-center gap-1 text-xs text-neutral-600">
-                Reference ID
-                <HelpTip>Fish 声音模型 ID。留空使用默认声音。</HelpTip>
+                Voice
+                <HelpTip>搜索、筛选 Fish 音色。支持按语言和性别过滤。也可使用自定义 Reference ID。</HelpTip>
               </label>
-              <input type="text" value={form.reference_id} onChange={(event) => set("reference_id", event.target.value)} className={inputClass} placeholder="留空使用默认声音" />
+              <FishVoicePicker
+                value={form.reference_id}
+                onChange={(id) => set("reference_id", id)}
+              />
             </div>
           </>
         ) : (
@@ -291,9 +354,11 @@ function ConfigForm({
                 <HelpTip>官方文档列出的 TTS 模型，如 `mimo-v2.5-tts`。</HelpTip>
               </label>
               <select value={form.mimoModel} onChange={(event) => set("mimoModel", event.target.value)} className={inputClass}>
-                <option value="mimo-v2.5-tts">mimo-v2.5-tts</option>
-                <option value="mimo-v2.5-tts-voiceclone">mimo-v2.5-tts-voiceclone</option>
-                <option value="mimo-v2.5-tts-voicedesign">mimo-v2.5-tts-voicedesign</option>
+                {MIMO_MODEL_OPTIONS.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -302,15 +367,11 @@ function ConfigForm({
                 <HelpTip>内置音色 ID，从下拉列表选择。voiceclone 模型改用下面的 data URI 输入。</HelpTip>
               </label>
               <select value={form.mimoVoice} onChange={(event) => set("mimoVoice", event.target.value)} className={inputClass} disabled={isVoiceClone}>
-                <option value="mimo_default">mimo_default (默认)</option>
-                <option value="冰糖">冰糖</option>
-                <option value="茉莉">茉莉</option>
-                <option value="苏打">苏打</option>
-                <option value="白桦">白桦</option>
-                <option value="Mia">Mia</option>
-                <option value="Chloe">Chloe</option>
-                <option value="Milo">Milo</option>
-                <option value="Dean">Dean</option>
+                {MIMO_VOICE_OPTIONS.map((voice) => (
+                  <option key={voice.value} value={voice.value}>
+                    {formatMimoVoiceLabel(voice.value)}
+                  </option>
+                ))}
               </select>
             </div>
             {isVoiceClone && (
@@ -318,7 +379,7 @@ function ConfigForm({
                 <div>
                   <label className="mb-1 flex items-center gap-1 text-xs text-neutral-600">
                     Voice Clone Audio File
-                    <HelpTip>选择参考音频后，前端会自动转成官方要求的 `data:{mime};base64,...` 并写入配置。</HelpTip>
+                    <HelpTip>选择参考音频后，前端会自动转成官方要求的 data:[mime];base64,... 并写入配置。</HelpTip>
                   </label>
                   <input
                     type="file"

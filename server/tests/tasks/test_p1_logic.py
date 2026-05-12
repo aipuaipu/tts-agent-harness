@@ -225,6 +225,21 @@ def test_script_mixed_punctuation_chunk_fields() -> None:
     assert chunks[0].metadata == {"segment_type": "hook"}
 
 
+def test_script_replaces_english_hyphens_with_spaces_in_normalized_text() -> None:
+    script = {
+        "segments": [
+            {"id": 1, "text": "这是 Human-in-the-Loop 测试。"},
+            {"id": 2, "text": "温度是 -5 度，不是 a-b-c。"},
+        ]
+    }
+    chunks = script_to_chunks(script, "ep")
+    assert len(chunks) == 2
+    assert chunks[0].text == "这是 Human-in-the-Loop 测试。"
+    assert chunks[1].text == "温度是 -5 度，不是 a-b-c。"
+    assert chunks[0].text_normalized == "这是 Human in the Loop 测试。"
+    assert chunks[1].text_normalized == "温度是 -5 度，不是 a b c。"
+
+
 def test_script_rejects_unknown_id_type() -> None:
     with pytest.raises(ValueError):
         script_to_chunks({"segments": [{"id": 1.5, "text": "x。"}]}, "ep")

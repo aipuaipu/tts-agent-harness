@@ -72,7 +72,9 @@ class XiaomiMimoTTSClient:
         if self._http is not None:
             yield self._http
             return
-        self._http = httpx.AsyncClient(timeout=DEFAULT_TIMEOUT)
+        # MiMo requests must bypass process-wide proxy env vars so local
+        # debugging proxies do not break calls to the official endpoint.
+        self._http = httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, trust_env=False)
         yield self._http
 
     def build_payload(self, text: str, params: XiaomiMimoTTSParams) -> dict[str, Any]:

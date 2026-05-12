@@ -71,9 +71,9 @@ export function EpisodeSidebar({
   return (
     <aside className="w-56 border-r border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 flex flex-col shrink-0">
       <div className="px-3 py-3 flex items-center justify-between border-b border-neutral-100 dark:border-neutral-700">
-        <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Episodes</span>
+        <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 tracking-wide">项目列表</span>
         <div className="flex items-center gap-1">
-          <button type="button" onClick={onNewEpisode} className="text-xs px-2 py-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-400">+ New</button>
+          <button type="button" onClick={onNewEpisode} className="text-xs px-2 py-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-400">+ 新建</button>
           <button
             type="button"
             onClick={onToggleCollapse}
@@ -121,7 +121,7 @@ export function EpisodeSidebar({
           );
         })}
       </div>
-      <div className="p-3 border-t border-neutral-100 dark:border-neutral-700 text-[11px] text-neutral-400 dark:text-neutral-500 font-mono">{episodes.length} episodes</div>
+      <div className="p-3 border-t border-neutral-100 dark:border-neutral-700 text-[11px] text-neutral-400 dark:text-neutral-500 font-mono">{episodes.length} 个项目</div>
     </aside>
   );
 }
