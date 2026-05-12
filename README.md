@@ -1,18 +1,18 @@
 # TTS Agent Harness
 
-当前版本：**[2026.04.29.15.08]** (详细更新日志见 [CHANGELOG.md](CHANGELOG.md))
+当前版本：**[2026.05.12]** (详细更新日志见 [CHANGELOG.md](CHANGELOG.md))
 
-确定性视频脚本转语音加字幕生产工具。输入脚本 JSON/TXT/MD 文档或者直接在 Web UI 中粘贴剪贴板文案，系统会自动智能分段，输出 per-shot WAV + 时间对齐字幕。
+确定性视频脚本转语音加字幕生产工具。导入脚本 JSON/TXT/MD 文档或者直接在 Web UI 中粘贴剪贴板文案，系统会自动智能分段，输出分段 WAV + 时间对齐字幕，最后拼接为完整的音频和字幕产物。
 
-**原项目在线 Demo**: https://hiveden-tts.fly.dev
+**原始项目在线 Demo**: https://hiveden-tts.fly.dev
 **新项目在线 Demo**: 待部署
 
 ## 最新特性 (Recent Updates)
 
-- **多端接口接入**：新增支持直连 Xiaomi MiMo 官方 TTS 服务端 API。
-- **输入方式大拓展**：除了标准的 `script.json`，现在支持直接上传 `.md` / `.txt` 文档，或者在 Web UI 中直接粘贴剪贴板文案，系统会自动智能分段。
-- **安全与体验全面提升**：前端 API Key 升级为加密 HttpOnly Cookie 存储极大提升安全性；音频支持带倍速的连续播放；并重构了大量的页面交互（如下载 Loading、配置展开折叠等）。
-
+- **极致流畅的多维音色筛选**：新增了针对 Fish Audio 音色的语言、性别、年龄等多维度过滤系统，引入 SWR 进行数据缓存，实现即时、高性能的音色探索。
+- **TTS 连字符发音彻底修复**：增加正则替换预处理逻辑，完美解决英文复合词间的连字符被语音引擎错误播报的问题。
+- **全量汉化与通俗化重构**：彻底告别生硬的技术缩写（如 P1/P2/Episode），全界面采用最直白的中文操作动词（如切分、预检、合成、项目等），大幅降低非技术人员的使用心智成本。
+- **多端接口接入与安全提升**：支持直连 Xiaomi MiMo 官方 TTS 服务端 API；前端 API Key 升级为加密 HttpOnly Cookie 存储极大提升安全性；音频支持带倍速的连续播放。
 
 ## 架构
 
@@ -22,7 +22,7 @@
                                      PostgreSQL + MinIO
 ```
 
-Pipeline: **P1 → P1c → P2 → P2c → P2v → P5 → P6 → P6v**
+流水线流程：**切分 → 预检 → 合成 → 初筛 → 校验 → 字幕 → 拼接 → 验收**
 
 ## 前置依赖
 
@@ -63,10 +63,10 @@ start.cmd
 
 ## 使用流程
 
-1. 上传 script.json 创建 episode
-2. 点击 Run 执行全量 pipeline
-3. 逐 chunk 听音频，不满意可编辑 text 后重试
-4. 全部满意后导出（per-shot WAV + 字幕 zip）
+1. 导入脚本文件或直接粘贴文案以创建**项目**
+2. 点击**合成全部**执行全量流水线
+3. 逐句试听音频，不满意可直接编辑文本后单句重跑（重试）
+4. 全部满意后导出（按镜头切分的 WAV + 字幕 zip 包）
 
 ### API Key 配置
 
@@ -88,9 +88,11 @@ start.cmd
 
 ## 脚本格式
 
+系统虽然支持多种导入格式，但在后台都会转换为标准的 `script.json`：
+
 ```json
 {
-  "title": "Episode Title",
+  "title": "项目标题",
   "segments": [
     { "id": 1, "type": "hook", "text": "要朗读的文本，可含 [break] 控制标记。" },
     { "id": 2, "type": "content", "text": "正文内容。" }
@@ -98,7 +100,7 @@ start.cmd
 }
 ```
 
-`text` 同时用于 TTS 输入和字幕来源。S2-Pro 控制标记（`[break]`/`[breath]`/phoneme）P5 自动 strip。
+`text` 同时用于 TTS 输入和字幕来源。S2-Pro 控制标记（`[break]`/`[breath]`/phoneme）在字幕环节会自动剥离。
 
 ## 导出格式（Remotion 消费）
 
@@ -123,14 +125,14 @@ episode.zip/
 | `GROQ_API_KEY` | 否 | Groq Whisper API 密钥（线上由用户前端填入） |
 | `DATABASE_URL` | 否 | PostgreSQL（默认 localhost:55432） |
 | `MINIO_ENDPOINT` | 否 | MinIO（默认 localhost:59000） |
-| `STORAGE_QUOTA_GB` | 否 | 存储上限 GB（默认 5），超限自动清理最旧未锁定 episode |
+| `STORAGE_QUOTA_GB` | 否 | 存储上限 GB（默认 5），超限自动清理最旧未锁定的项目 |
 | `STORAGE_TARGET_GB` | 否 | 清理目标 GB（默认 4） |
 | `COOKIE_SECRET` | 否 | 用于加密 Cookie 中存储的 API Key（生产环境建议配置，否则重启失效） |
 
-## Episode 管理
+## 项目管理
 
-- **Lock/Unlock**: `POST /episodes/{id}/lock` — 锁定 episode 防止修改和清理
-- **自动清理**: 存储超 `STORAGE_QUOTA_GB` 时，按时间顺序删除最旧的未锁定 episode
+- **锁定/解锁 (Lock/Unlock)**: `POST /episodes/{id}/lock` — 锁定项目防止被意外修改和自动清理
+- **自动清理**: 存储超 `STORAGE_QUOTA_GB` 时，按时间顺序删除最旧的未锁定项目
 
 ## 技术栈
 
@@ -155,7 +157,7 @@ cd web && npx playwright test              # E2E 测试
 
 ## TTS Providers
 
-现在 P2 支持多 provider：
+目前系统支持多 provider 进行合成：
 
 - `fish`
 - `xiaomi_mimo`
@@ -164,9 +166,9 @@ cd web && npx playwright test              # E2E 测试
 
 - `fish` 直接调用 Fish Audio HTTP API，需要 Fish API Key
 - `xiaomi_mimo` 直连官方 Xiaomi MiMo 服务端 HTTP API：
-- endpoint：`https://api.xiaomimimo.com/v1/chat/completions`
-- header：`api-key: $XIAOMI_MIMO_API_KEY`
-- 非流式返回：`choices[0].message.audio.data`（base64）
+  - endpoint：`https://api.xiaomimimo.com/v1/chat/completions`
+  - header：`api-key: $XIAOMI_MIMO_API_KEY`
+  - 非流式返回：`choices[0].message.audio.data`（base64）
 
 典型 `tts_config`：
 
@@ -192,7 +194,7 @@ voiceclone 典型配置：
 
 ## Authoring Input / 脚本导入
 
-现在创建 episode 有三种入口，都会在后台统一转换成 canonical `script.json`：
+现在新建项目有三种入口，都会在后台统一转换成 canonical `script.json`：
 
 - 上传 `script.json`（兼容旧流程）
 - 上传 `.txt` / `.md` 文档
@@ -200,10 +202,10 @@ voiceclone 典型配置：
 
 默认导入规则是确定性的：
 
-- Markdown `# 标题` 或 frontmatter `title:` 会变成 script title
-- 空行分隔的段落会变成不同 shot
-- Markdown 列表项也会各自变成一个 shot
-- 下游流水线仍然只消费标准 JSON，不需要改 P1-P6
+- Markdown `# 标题` 或 frontmatter `title:` 会变成项目标题
+- 空行分隔的段落会变成不同的镜头 (shot)
+- Markdown 列表项也会各自变成一个镜头
+- 下游流水线仍然只消费标准 JSON，底层切分逻辑无需变更
 
 对普通用户的建议写法：
 
